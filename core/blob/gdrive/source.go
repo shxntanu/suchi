@@ -42,9 +42,7 @@ func NewSource(ctx context.Context, config Config) (*Source, error) {
 // List returns every Aether storage key and its file ID from the configured
 // parent, following Drive's page tokens and rejecting duplicate keys.
 func (s *Source) List(ctx context.Context) (map[string]string, error) {
-	q := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' } and trashed = false",
-		escapeDriveQuery(s.parentID), aetherStorageKey)
-	files, err := s.drive.listFiles(ctx, q)
+	files, err := s.drive.listMarkedChildren(ctx, s.parentID, aetherStorageKey)
 	if err != nil {
 		return nil, fmt.Errorf("list Aether files from Google Drive: %w", err)
 	}
