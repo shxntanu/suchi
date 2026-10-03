@@ -549,7 +549,7 @@ func (c *CAS) ListContext(ctx context.Context, fn func(RemoteObject) error) erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if entry.IsDir() || !validHash(entry.Name()) {
+		if entry.IsDir() || !validHash(entry.Name()) || filepath.Clean(path) != c.path(entry.Name()) {
 			return nil
 		}
 		info, err := entry.Info()
