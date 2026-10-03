@@ -118,6 +118,12 @@ type sourceEntry struct {
 	MD5           string
 }
 
+type stagedFilename struct {
+	Name  string
+	SHA   string
+	Entry *sourceEntry
+}
+
 // Run reads and verifies every Aether document manifest, then calculates the
 // number of unique original bytes Suchi would store. In dry-run mode it makes
 // no filesystem changes. Bundle publication is kept separate from inventory
@@ -150,7 +156,8 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return report, ctxErr
 		}
-		return report, fmt.Errorf("aether migration: list source objects: %w", err)
+		addFailure(report, nil, "source inventory could not be listed")
+		return report, errors.New("aether migration: source inventory could not be listed")
 	}
 	entries := inventoryEntries(listed, report)
 	valid := make([]*sourceEntry, 0, len(entries))
@@ -226,9 +233,25 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 		}
 	}
 
+	stageDir := ""
+	if !opts.DryRun {
+		stageDir, err = os.MkdirTemp(filepath.Dir(outputDir), ".suchi-aether-migration-")
+		if err != nil {
+			addFailure(report, nil, "temporary bundle staging could not be created")
+			return report, fmt.Errorf("aether migration: create staging directory: %w", err)
+		}
+		defer os.RemoveAll(stageDir)
+		if err := os.Mkdir(filepath.Join(stageDir, "originals"), 0o700); err != nil {
+			addFailure(report, nil, "temporary bundle staging could not be created")
+			return report, fmt.Errorf("aether migration: create originals staging directory: %w", err)
+		}
+	}
+
 	projected := make(map[string]int64)
 	tagNames := make(map[string]struct{})
 	verified := make([]*sourceEntry, 0, len(valid))
+	filenames := make(map[string]stagedFilename)
+	filenameConflicts := make(map[string]bool)
 	for _, entry := range valid {
 		if err := ctx.Err(); err != nil {
 			return report, err
@@ -241,7 +264,33 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 			addFailure(report, entry, "original is missing")
 			continue
 		}
-		sha, md5sum, size, err := verifyOriginal(ctx, src, entry.OriginalID, entry.Document.SizeBytes)
+
+		filenameKey := strings.ToLower(entry.Document.OriginalFilename)
+		priorFilename, filenameSeen := filenames[filenameKey]
+		filenameConflict := filenameSeen && (priorFilename.Name != entry.Document.OriginalFilename || priorFilename.SHA != entry.Document.SHA256)
+		var stagedFile *os.File
+		var destination io.Writer = io.Discard
+		if stageDir != "" && !filenameSeen {
+			path := filepath.Join(stageDir, "originals", entry.Document.OriginalFilename)
+			stagedFile, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				addFailure(report, entry, "original could not be staged")
+				continue
+			}
+			destination = stagedFile
+		}
+		sha, md5sum, size, err := verifyOriginal(ctx, src, entry.OriginalID, entry.Document.SizeBytes, entry.Document.SHA256, destination)
+		if stagedFile != nil {
+			if syncErr := stagedFile.Sync(); err == nil && syncErr != nil {
+				err = syncErr
+			}
+			if closeErr := stagedFile.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+			if err != nil {
+				_ = os.Remove(filepath.Join(stageDir, "originals", entry.Document.OriginalFilename))
+			}
+		}
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return report, ctxErr
@@ -249,9 +298,16 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 			addFailure(report, entry, integrityReason(err))
 			continue
 		}
-		if sha != entry.Document.SHA256 {
-			addFailure(report, entry, "original SHA-256 does not match manifest")
+		if filenameConflict {
+			if !filenameConflicts[filenameKey] {
+				addFailure(report, priorFilename.Entry, "different source objects share a bundle filename")
+				filenameConflicts[filenameKey] = true
+			}
+			addFailure(report, entry, "different source objects share a bundle filename")
 			continue
+		}
+		if !filenameSeen {
+			filenames[filenameKey] = stagedFilename{Name: entry.Document.OriginalFilename, SHA: sha, Entry: entry}
 		}
 		entry.SHA256 = sha
 		entry.MD5 = md5sum
@@ -290,8 +346,17 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 	if opts.DryRun {
 		return report, nil
 	}
-	_ = verified
-	return report, errors.New("aether migration: bundle publication is not available")
+	if err := writeStagingBundle(stageDir, verified, report); err != nil {
+		addFailure(report, nil, "bundle files could not be written")
+		report.Complete = false
+		return report, fmt.Errorf("aether migration: write bundle staging: %w", err)
+	}
+	if err := publishStagingDirectory(ctx, stageDir, outputDir); err != nil {
+		addFailure(report, nil, "bundle output could not be published")
+		report.Complete = false
+		return report, fmt.Errorf("aether migration: publish bundle: %w", err)
+	}
+	return report, nil
 }
 
 func ensureOutputAvailable(outputDir string) error {
@@ -515,7 +580,7 @@ func readAllContext(ctx context.Context, src io.Reader, limit int64) ([]byte, er
 	}
 }
 
-func verifyOriginal(ctx context.Context, src Source, fileID string, expectedSize int64) (sha256Hex, md5Hex string, size int64, err error) {
+func verifyOriginal(ctx context.Context, src Source, fileID string, expectedSize int64, expectedSHA string, destination io.Writer) (sha256Hex, md5Hex string, size int64, err error) {
 	reader, err := src.Open(ctx, fileID)
 	if err != nil {
 		return "", "", 0, err
@@ -523,7 +588,10 @@ func verifyOriginal(ctx context.Context, src Source, fileID string, expectedSize
 	if reader == nil {
 		return "", "", 0, errors.New("source returned an empty reader")
 	}
-	sha, md5sum, size, readErr := hashReaderContext(ctx, reader)
+	if destination == nil {
+		destination = io.Discard
+	}
+	sha, md5sum, size, readErr := hashCopyContext(ctx, destination, reader)
 	closeErr := reader.Close()
 	if readErr != nil {
 		return "", "", size, readErr
@@ -534,12 +602,16 @@ func verifyOriginal(ctx context.Context, src Source, fileID string, expectedSize
 	if size != expectedSize {
 		return "", "", size, errOriginalSize
 	}
+	if sha != expectedSHA {
+		return "", "", size, errOriginalHash
+	}
 	return sha, md5sum, size, nil
 }
 
 var errOriginalSize = errors.New("original size mismatch")
+var errOriginalHash = errors.New("original sha256 mismatch")
 
-func hashReaderContext(ctx context.Context, reader io.Reader) (sha256Hex, md5Hex string, size int64, err error) {
+func hashCopyContext(ctx context.Context, destination io.Writer, reader io.Reader) (sha256Hex, md5Hex string, size int64, err error) {
 	sha := sha256.New()
 	md5sum := md5.New()
 	buf := make([]byte, 128*1024)
@@ -549,12 +621,19 @@ func hashReaderContext(ctx context.Context, reader io.Reader) (sha256Hex, md5Hex
 		}
 		n, readErr := reader.Read(buf)
 		if n > 0 {
-			if size > math.MaxInt64-int64(n) {
+			written, writeErr := destination.Write(buf[:n])
+			if writeErr != nil {
+				return "", "", size, writeErr
+			}
+			if written != n {
+				return "", "", size, io.ErrShortWrite
+			}
+			if size > math.MaxInt64-int64(written) {
 				return "", "", size, errors.New("original byte count overflows")
 			}
-			_, _ = sha.Write(buf[:n])
-			_, _ = md5sum.Write(buf[:n])
-			size += int64(n)
+			_, _ = sha.Write(buf[:written])
+			_, _ = md5sum.Write(buf[:written])
+			size += int64(written)
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
@@ -571,6 +650,9 @@ func hashReaderContext(ctx context.Context, reader io.Reader) (sha256Hex, md5Hex
 func integrityReason(err error) string {
 	if errors.Is(err, errOriginalSize) {
 		return "original size does not match manifest"
+	}
+	if errors.Is(err, errOriginalHash) {
+		return "original SHA-256 does not match manifest"
 	}
 	return "original could not be read"
 }
