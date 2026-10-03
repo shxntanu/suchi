@@ -53,8 +53,8 @@ func (s *Store) Get(ctx context.Context, sum string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download Google Drive blob: %w", err)
 	}
-	defer resp.Body.Close()
-
+	// The caller owns the successful response body. CAS closes it after staging
+	// and verifying the bytes, and readback verification closes it directly.
 	return resp.Body, nil
 }
 

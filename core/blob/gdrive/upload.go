@@ -32,8 +32,8 @@ const (
 
 var _ blob.RemoteBackend = (*Store)(nil)
 
-// Put validates the requested hash and size, spools the input privately, then
-// creates the immutable object through a resumable Drive upload.
+// Put validates the requested hash and size, then creates the immutable object
+// through a resumable Drive upload.
 func (s *Store) Put(ctx context.Context, sum string, r io.ReadSeeker, size int64) (retErr error) {
 	s.putMu.Lock()
 	defer s.putMu.Unlock()
