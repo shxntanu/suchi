@@ -4,7 +4,6 @@ package gdrive
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -12,20 +11,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
-	"sync"
 
 	"github.com/johnnybravo-xyz/suchi/core/blob"
 	pluginapi "github.com/johnnybravo-xyz/suchi/plugin-api"
 )
-
-var _ interface {
-	Get(context.Context, string) (io.ReadCloser, error)
-	Stat(context.Context, string) (blob.RemoteObject, error)
-	List(context.Context, func(blob.RemoteObject) error) error
-	Delete(context.Context, string) error
-} = (*Store)(nil)
 
 // Stat returns the metadata for an owned blob without downloading its bytes.
 func (s *Store) Stat(ctx context.Context, sum string) (blob.RemoteObject, error) {
@@ -42,8 +32,8 @@ func (s *Store) Stat(ctx context.Context, sum string) (blob.RemoteObject, error)
 	return remoteObject(file, sum)
 }
 
-// Get downloads, hashes, and rewinds one owned blob into a private temporary
-// file. Closing the reader removes the temporary file.
+// Get streams one owned blob from Drive. The CAS facade hashes and stages the
+// response before exposing a seekable local reader to callers.
 func (s *Store) Get(ctx context.Context, sum string) (io.ReadCloser, error) {
 	if !validHash(sum) {
 		return nil, fmt.Errorf("invalid SHA-256 hash %q", sum)
@@ -55,47 +45,17 @@ func (s *Store) Get(ctx context.Context, sum string) (io.ReadCloser, error) {
 	if !found {
 		return nil, blob.ErrNotFound
 	}
-	query := url.Values{"alt": []string{"media"}}
-	resp, err := s.drive.request(ctx, http.MethodGet, s.drive.apiURL(fileURLPath(file.ID), query), nil, nil)
+	query := url.Values{
+		"alt":               []string{"media"},
+		"supportsAllDrives": []string{"true"},
+	}
+	resp, err := s.drive.request(ctx, http.MethodGet, s.drive.apiFileURL(file.ID, query), nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("download Google Drive blob: %w", err)
 	}
 	defer resp.Body.Close()
 
-	tmp, err := os.CreateTemp("", "suchi-gdrive-*.tmp")
-	if err != nil {
-		return nil, fmt.Errorf("create private Google Drive download file: %w", err)
-	}
-	path := tmp.Name()
-	cleanup := func() {
-		_ = tmp.Close()
-		_ = os.Remove(path)
-	}
-	expectedSize, err := file.size()
-	if err != nil {
-		cleanup()
-		return nil, err
-	}
-	hash := sha256.New()
-	size, err := copyAndHash(ctx, tmp, resp.Body, hash)
-	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("download Google Drive blob bytes: %w", err)
-	}
-	if size != expectedSize {
-		cleanup()
-		return nil, fmt.Errorf("Google Drive blob size mismatch: got %d bytes, expected %d", size, expectedSize)
-	}
-	gotSum := hex.EncodeToString(hash.Sum(nil))
-	if gotSum != sum {
-		cleanup()
-		return nil, errors.New("Google Drive blob content failed SHA-256 verification")
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("rewind verified Google Drive blob: %w", err)
-	}
-	return &tempReader{file: tmp, path: path}, nil
+	return resp.Body, nil
 }
 
 // List visits all blobs carrying Suchi's hash marker under the marked folder.
@@ -133,7 +93,8 @@ func (s *Store) Delete(ctx context.Context, sum string) error {
 	if err != nil || !found {
 		return err
 	}
-	resp, err := s.drive.request(ctx, http.MethodDelete, s.drive.apiURL(fileURLPath(file.ID), nil), nil, nil)
+	query := url.Values{"supportsAllDrives": []string{"true"}}
+	resp, err := s.drive.request(ctx, http.MethodDelete, s.drive.apiFileURL(file.ID, query), nil, nil)
 	if err == nil {
 		_ = resp.Body.Close()
 		return nil
@@ -187,6 +148,7 @@ func checksumMatches(checksum, sum string) bool {
 func copyAndHash(ctx context.Context, dst io.Writer, src io.Reader, hash io.Writer) (int64, error) {
 	buf := make([]byte, 128*1024)
 	var total int64
+	emptyReads := 0
 	out := io.MultiWriter(dst, hash)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -194,6 +156,7 @@ func copyAndHash(ctx context.Context, dst io.Writer, src io.Reader, hash io.Writ
 		}
 		n, readErr := src.Read(buf)
 		if n > 0 {
+			emptyReads = 0
 			written, writeErr := out.Write(buf[:n])
 			total += int64(written)
 			if writeErr != nil {
@@ -203,6 +166,12 @@ func copyAndHash(ctx context.Context, dst io.Writer, src io.Reader, hash io.Writ
 				return total, io.ErrShortWrite
 			}
 		}
+		if n == 0 && readErr == nil {
+			emptyReads++
+			if emptyReads >= 100 {
+				return total, io.ErrNoProgress
+			}
+		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				return total, nil
@@ -210,32 +179,4 @@ func copyAndHash(ctx context.Context, dst io.Writer, src io.Reader, hash io.Writ
 			return total, readErr
 		}
 	}
-}
-
-type tempReader struct {
-	file *os.File
-	path string
-	once sync.Once
-	err  error
-}
-
-func (r *tempReader) Read(p []byte) (int, error) {
-	return r.file.Read(p)
-}
-
-func (r *tempReader) Seek(offset int64, whence int) (int64, error) {
-	return r.file.Seek(offset, whence)
-}
-
-func (r *tempReader) Close() error {
-	r.once.Do(func() {
-		closeErr := r.file.Close()
-		removeErr := os.Remove(r.path)
-		if closeErr != nil {
-			r.err = closeErr
-		} else if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			r.err = removeErr
-		}
-	})
-	return r.err
 }
