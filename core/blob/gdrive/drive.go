@@ -10,13 +10,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 )
 
 // Store is the Suchi blob backend scoped to one marked child folder.
 type Store struct {
 	drive       *driveClient
-	parentID    string
 	namespaceID string
+	putMu       sync.Mutex
 }
 
 // New validates the configured parent and resolves the marked Suchi namespace.
@@ -42,13 +43,16 @@ func New(ctx context.Context, config Config) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{drive: drive, parentID: config.FolderID, namespaceID: namespaceID}, nil
+	return &Store{drive: drive, namespaceID: namespaceID}, nil
 }
 
 func (d *driveClient) validateParent(ctx context.Context, parentID string) error {
-	query := url.Values{"fields": []string{"id,mimeType,trashed"}}
+	query := url.Values{
+		"fields":            []string{"id,mimeType,trashed"},
+		"supportsAllDrives": []string{"true"},
+	}
 	var parent driveFile
-	if err := d.getJSON(ctx, d.apiURL(fileURLPath(parentID), query), &parent); err != nil {
+	if err := d.getJSON(ctx, d.apiFileURL(parentID, query), &parent); err != nil {
 		return fmt.Errorf("read configured Google Drive parent folder: %w", err)
 	}
 	if parent.ID != parentID || parent.MIMEType != folderMIMEType || parent.Trashed {
@@ -63,9 +67,11 @@ func (d *driveClient) listFiles(ctx context.Context, q string) ([]driveFile, err
 	pageToken := ""
 	for {
 		query := url.Values{
-			"q":        []string{q},
-			"pageSize": []string{"1000"},
-			"fields":   []string{"nextPageToken,files(id,name,mimeType,parents,trashed,appProperties,size,sha256Checksum,modifiedTime)"},
+			"q":                         []string{q},
+			"pageSize":                  []string{"1000"},
+			"supportsAllDrives":         []string{"true"},
+			"includeItemsFromAllDrives": []string{"true"},
+			"fields":                    []string{"nextPageToken,files(id,name,mimeType,parents,trashed,appProperties,size,sha256Checksum,modifiedTime)"},
 		}
 		if pageToken != "" {
 			query.Set("pageToken", pageToken)
@@ -123,7 +129,10 @@ func (d *driveClient) createNamespace(ctx context.Context, parentID string) (str
 		},
 	}
 	body, _ := json.Marshal(metadata)
-	query := url.Values{"fields": []string{"id,name,mimeType,parents,appProperties,trashed"}}
+	query := url.Values{
+		"fields":            []string{"id,name,mimeType,parents,appProperties,trashed"},
+		"supportsAllDrives": []string{"true"},
+	}
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	resp, createErr := d.request(ctx, http.MethodPost, d.apiURL("/files", query), bytes.NewReader(body), headers)

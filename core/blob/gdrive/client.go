@@ -33,6 +33,11 @@ const (
 	defaultHTTPTimeout     = 5 * time.Minute
 )
 
+var (
+	errOffOriginRedirect = errors.New("refusing off-origin HTTP redirect")
+	errTransport         = errors.New("Google Drive transport failed")
+)
+
 // Config contains the OAuth credentials and parent folder for Drive storage.
 // Empty endpoint fields select Google's production endpoints.
 type Config struct {
@@ -190,7 +195,7 @@ func sameOriginRedirectClient(base *http.Client) *http.Client {
 	original := base.CheckRedirect
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if len(via) > 0 && !sameOrigin(via[0].URL, request.URL) {
-			return errors.New("refusing off-origin HTTP redirect")
+			return errOffOriginRedirect
 		}
 		if original != nil {
 			return original(request, via)
@@ -223,6 +228,15 @@ func (c *driveClient) accessToken(ctx context.Context) (string, error) {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
+		var retrieveErr *oauth2.RetrieveError
+		if errors.As(err, &retrieveErr) {
+			switch retrieveErr.ErrorCode {
+			case "invalid_grant":
+				return "", errors.New("Google Drive refresh token is invalid, expired, or revoked")
+			case "invalid_client":
+				return "", errors.New("Google OAuth client credentials were rejected")
+			}
+		}
 		// OAuth response bodies can echo request details. Keep diagnostics free of
 		// credential values by intentionally omitting the underlying error.
 		return "", errors.New("refresh Google Drive OAuth access token failed")
@@ -235,6 +249,18 @@ func (c *driveClient) accessToken(ctx context.Context) (string, error) {
 }
 
 func (c *driveClient) request(ctx context.Context, method, target string, body io.Reader, headers http.Header) (*http.Response, error) {
+	resp, err := c.do(ctx, method, target, body, headers)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = resp.Body.Close()
+		return nil, httpStatusError(resp.StatusCode)
+	}
+	return resp, nil
+}
+
+func (c *driveClient) do(ctx context.Context, method, target string, body io.Reader, headers http.Header) (*http.Response, error) {
 	accessToken, err := c.accessToken(ctx)
 	if err != nil {
 		return nil, err
@@ -253,11 +279,10 @@ func (c *driveClient) request(ctx context.Context, method, target string, body i
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, errors.New("Google Drive request failed")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_ = resp.Body.Close()
-		return nil, httpStatusError(resp.StatusCode)
+		if errors.Is(err, errOffOriginRedirect) {
+			return nil, errOffOriginRedirect
+		}
+		return nil, errTransport
 	}
 	return resp, nil
 }
@@ -273,15 +298,24 @@ func (c *driveClient) apiURL(path string, query url.Values) string {
 	return u.String()
 }
 
+func (c *driveClient) apiFileURL(id string, query url.Values) string {
+	u := *c.apiBase
+	escapedPath := strings.TrimRight(u.EscapedPath(), "/") + "/files/" + url.PathEscape(id)
+	path, err := url.PathUnescape(escapedPath)
+	if err != nil {
+		return ""
+	}
+	u.Path = path
+	u.RawPath = escapedPath
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
 func (c *driveClient) uploadURL(path string, query url.Values) string {
 	u := *c.uploadBase
 	u.Path = strings.TrimRight(u.Path, "/") + path
 	u.RawQuery = query.Encode()
 	return u.String()
-}
-
-func fileURLPath(id string) string {
-	return "/files/" + url.PathEscape(id)
 }
 
 func (c *driveClient) getJSON(ctx context.Context, target string, out any) error {

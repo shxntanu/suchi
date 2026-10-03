@@ -82,17 +82,23 @@ func (s *Source) Open(ctx context.Context, id string) (io.ReadCloser, error) {
 		return nil, errors.New("Aether Drive file ID was not returned by List")
 	}
 
-	query := url.Values{"fields": []string{"id,parents,appProperties,trashed"}}
+	query := url.Values{
+		"fields":            []string{"id,parents,appProperties,trashed"},
+		"supportsAllDrives": []string{"true"},
+	}
 	var file driveFile
-	if err := s.drive.getJSON(ctx, s.drive.apiURL(fileURLPath(id), query), &file); err != nil {
+	if err := s.drive.getJSON(ctx, s.drive.apiFileURL(id, query), &file); err != nil {
 		return nil, fmt.Errorf("verify listed Aether Drive file: %w", err)
 	}
 	if file.ID != id || file.Trashed || !hasParent(file, s.parentID) || file.AppProperties[aetherStorageKey] != key {
 		return nil, errors.New("listed Aether Drive file is no longer in the configured parent")
 	}
 
-	mediaQuery := url.Values{"alt": []string{"media"}}
-	resp, err := s.drive.request(ctx, http.MethodGet, s.drive.apiURL(fileURLPath(id), mediaQuery), nil, make(http.Header))
+	mediaQuery := url.Values{
+		"alt":               []string{"media"},
+		"supportsAllDrives": []string{"true"},
+	}
+	resp, err := s.drive.request(ctx, http.MethodGet, s.drive.apiFileURL(id, mediaQuery), nil, make(http.Header))
 	if err != nil {
 		return nil, fmt.Errorf("download listed Aether Drive file: %w", err)
 	}
