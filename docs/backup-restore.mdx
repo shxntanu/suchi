@@ -5,6 +5,13 @@ description: "Create a consistent backup of the database, blobs, and credential 
 
 Suchi keeps persistent application state under `DATA_DIR`:
 
+With [Google Drive storage](/google-drive-storage), original and derived bytes
+live in Suchi's marked Drive namespace; local `blobs/` may contain only optional
+materialized view targets. A complete backup must include the corresponding
+Drive objects along with a consistent SQLite snapshot, `.decrypt-key` and
+configuration. Local working files are disposable. Built-in database snapshots
+remain database-only; remote GC can reclaim objects an older snapshot needs.
+
 ```text
 $DATA_DIR/
   suchi.db              SQLite metadata, users, jobs, FTS, and audit events

@@ -28,6 +28,21 @@ Runs the HTTP server. Blocks until SIGINT/SIGTERM.
 - Logs the effective egress surface at INFO.
 - Listens on `LISTEN_ADDR` (default `:8000`).
 
+## `suchi migrate-aether --out DIR [--dry-run]`
+
+Read Aether v1 sidecars and originals using configured `GDRIVE_*` credentials.
+Dry-run reports inventory and projected bytes. Normal execution verifies source
+SHA-256 and creates a new import bundle plus a migration report; it refuses
+overwrites and never modifies Aether files. Import the reviewed bundle with
+`suchi import --from DIR --owner-email EMAIL`. See [Drive migration](/google-drive-storage).
+
+## `suchi storage-transfer [--apply]`
+
+With `STORAGE_PROVIDER=gdrive`, verify referenced bytes in an existing local
+Suchi archive. `--apply` publishes them into Suchi's Drive namespace without
+removing local originals. Stop all archive writers throughout transfer.
+The default performs verification and reports counts/bytes without Drive writes.
+
 ## `suchi healthcheck`
 
 Probes `LISTEN_ADDR`'s `/readyz` over loopback. Exit `0` if the server

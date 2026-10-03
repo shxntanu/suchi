@@ -3,6 +3,15 @@
 Notable user-visible changes to Suchi are recorded here.
 
 ## [Unreleased]
+### Added
+
+- Add optional Google Drive storage for immutable originals and derived bytes,
+  with verified seekable working files and local SQLite/credential keys.
+- Add read-only Aether-to-import-bundle migration and an offline verified
+  local-to-Drive storage transfer. Drive uses its own blob namespace.
+- Add configurable physical document views, defaulting off with Drive to
+  avoid retaining a complete local copy of the document archive.
+
 ### Fixed
 
 - Repair rendered links created by beta.1 and beta.2 when a stable-v1 refile

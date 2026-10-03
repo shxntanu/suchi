@@ -3,6 +3,17 @@ title: "Configuration"
 description: "Boot configuration, live settings, defaults, and precedence."
 ---
 
+## Blob storage
+
+`STORAGE_PROVIDER=local` preserves filesystem CAS. Set `gdrive` with
+`GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN` and
+`GDRIVE_FOLDER_ID` to store bytes remotely. Secrets support `_FILE` mounts.
+`DATA_DIR` still requires persistent disk for SQLite and keys.
+`RENDER_DOCUMENT_VIEWS` defaults true locally and false with Drive;
+explicit true retains complete local targets for physical symlink views.
+See [Google Drive storage](/google-drive-storage) for credentials, migration,
+working-space requirements and recovery.
+
 ## Precedence
 
 Suchi first resolves boot configuration, last wins:
