@@ -258,6 +258,9 @@ func (c *CAS) PutContext(ctx context.Context, r io.Reader) (pluginapi.BlobRef, e
 	if err := requireContext(ctx); err != nil {
 		return pluginapi.BlobRef{}, err
 	}
+	if r == nil {
+		return pluginapi.BlobRef{}, errors.New("blob reader is required")
+	}
 	if c.remote != nil {
 		return c.putRemote(ctx, r)
 	}
@@ -562,6 +565,9 @@ func (c *CAS) ListContext(ctx context.Context, fn func(RemoteObject) error) erro
 
 // List walks every stored blob. Order is filesystem/provider-defined.
 func (c *CAS) List(fn func(pluginapi.BlobRef) error) error {
+	if fn == nil {
+		return errors.New("blob list callback is required")
+	}
 	return c.ListContext(context.Background(), func(object RemoteObject) error {
 		return fn(object.Ref)
 	})
@@ -612,9 +618,6 @@ func (c *CAS) MaterializeContext(ctx context.Context, sum string) (result string
 	defer func() {
 		retErr = errors.Join(retErr, rc.Close())
 	}()
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return "", fmt.Errorf("mkdir materialized shard: %w", err)
-	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".materialize-*.tmp")
 	if err != nil {
 		return "", err
@@ -735,6 +738,13 @@ func (f *contextFile) Read(p []byte) (int, error) {
 	return f.File.Read(p)
 }
 
+func (f *contextFile) ReadAt(p []byte, offset int64) (int, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.File.ReadAt(p, offset)
+}
+
 func (f *contextFile) WriteTo(w io.Writer) (int64, error) {
 	return io.Copy(w, contextReader{ctx: f.ctx, reader: f.File})
 }
@@ -752,6 +762,13 @@ func (f *tempReadSeekCloser) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return f.File.Read(p)
+}
+
+func (f *tempReadSeekCloser) ReadAt(p []byte, offset int64) (int, error) {
+	if err := f.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return f.File.ReadAt(p, offset)
 }
 
 func (f *tempReadSeekCloser) WriteTo(w io.Writer) (int64, error) {
