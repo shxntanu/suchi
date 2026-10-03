@@ -39,8 +39,18 @@ files it created inside that folder. If the parent metadata request returns
 404, Suchi checks for app-visible Aether files or a marked Suchi namespace
 whose returned parent matches the configured folder ID. This supports existing
 Aether archives with narrow credentials. Unmarked files, other parents and an
-empty inventory do not establish access; check the folder ID and owner/app
-authorization if validation still fails.
+empty inventory do not establish access. On writable startup, if metadata is
+hidden and both inventories are successfully read but empty, Suchi attempts to
+create its marked child namespace. Startup proceeds only after querying back a
+valid namespace directly under the configured parent. Google still enforces
+write permission; a denied creation fails startup. Read-only commands require
+existing access evidence and never create a namespace.
+
+A newly created folder in Drive's web UI may need authorization for the OAuth
+app when using `drive.file`. Refreshing a token alone does not grant access to
+that folder. Use the folder already working with Aether, or authorize the new
+folder for the same app through Google Picker or a Drive Open-with flow. Check
+the folder ID and owner/app authorization if namespace creation is denied.
 
 Aether and blob inventories list direct, untrashed folder children across all
 pages, then filter private property markers locally. This avoids key-only

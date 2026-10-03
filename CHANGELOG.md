@@ -19,6 +19,9 @@ Notable user-visible changes to Suchi are recorded here.
 - Enumerate private Drive markers from paginated folder metadata instead of
   key-only queries, and classify recognized 400 errors without exposing raw
   provider messages.
+- Allow writable Drive startup to establish access to an empty parent with
+  hidden metadata by creating and verifying Suchi's marked child namespace;
+  read-only commands continue to require existing evidence.
 - Repair rendered links created by beta.1 and beta.2 when a stable-v1 refile
   verifies that the linked blob belongs to the document.
 - Keep operational dead-job details and the Retry/Dismiss recovery controls out

@@ -155,8 +155,14 @@ Close. SHA-256 references in SQLite remain provider-independent. Only the marked
 Suchi child namespace is mutable; Aether source migration is read-only.
 Parent validation normally reads folder metadata. For a 404 with narrow app
 access, it requires app-visible marked Aether/Suchi children whose returned
-parents contain the configured ID. Missing evidence fails startup; other HTTP
-errors retain their normal failure behavior.
+parents contain the configured ID. Other HTTP errors retain their normal failure
+behavior. Writable startup may establish missing evidence by creating and
+querying back the marked child namespace when
+the parent metadata returned 404 and both fallback inventories succeeded but
+were empty. Read-only constructors still require existing evidence; malformed
+metadata and failed requests never enable this creation path. Google enforces
+parent write access, and startup requires the returned namespace's marker,
+folder MIME type and configured parent to match.
 Inventories enumerate direct, untrashed children with pagination and filter
 private property markers locally; empty marked values still fail validation.
 Exact namespace/blob lookups retain key-and-value predicates. Bad-request
