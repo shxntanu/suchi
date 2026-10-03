@@ -327,7 +327,7 @@ func FilePaths(root string, d DocumentFields) (original string, archive string, 
 		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 			return "", "", fmt.Errorf("unsafe bundle original path %q", d.OriginalPath)
 		}
-		original, err = safeExistingBundleFile(filepath.Join(root, "originals"), filepath.Join(root, "originals", clean))
+		original, err = safeExistingBundleFile(root, filepath.Join(root, "originals", clean))
 	} else {
 		original, err = resolveExportedFile(root, "originals", d.OriginalFilename)
 	}
