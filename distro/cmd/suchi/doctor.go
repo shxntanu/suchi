@@ -45,6 +45,7 @@ import (
 	"github.com/johnnybravo-xyz/suchi/core/sandbox"
 	"github.com/johnnybravo-xyz/suchi/core/settings"
 	"github.com/johnnybravo-xyz/suchi/distro/internal/diagnostics"
+	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 )
 
 func runDoctor(args []string) int {
@@ -83,6 +84,19 @@ func runDoctor(args []string) int {
 	}
 	fmt.Println()
 	ctx := context.Background()
+	provider := cfg.StorageProvider
+	if provider == "" {
+		provider = "local"
+	}
+	fmt.Printf("blob storage: %s (physical document views: %v)\n", provider, cfg.RenderDocumentViews)
+	if provider == "gdrive" {
+		// Read-only check: never creates or mutates a Drive namespace.
+		if _, err := storage.New(ctx, cfg, false); err != nil {
+			fmt.Fprintf(os.Stderr, "  ✗ Drive credentials/namespace: %v\n", err)
+			return 1
+		}
+		fmt.Println("  ✓ Drive owner authorization and namespace are accessible")
+	}
 	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  ✗ open DB: %v\n", err)
@@ -341,7 +355,7 @@ func runDoctor(args []string) int {
 		for sum := range references {
 			expected = append(expected, sum)
 		}
-		cas, err := blob.New(cfg.DataDir)
+		cas, err := storage.New(ctx, cfg, false)
 		if err != nil {
 			fmt.Printf("  ✗ open CAS: %v\n", err)
 			return 1

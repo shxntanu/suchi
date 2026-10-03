@@ -202,7 +202,7 @@ func makeFixtureIngest(d *db.DB, cas *blob.CAS, ownerID int64, now int64) func(c
 			dates = append(dates, candidate)
 		}
 		// 1. Stream the already-confined fixture into the CAS.
-		ref, err := cas.Put(content)
+		ref, err := cas.PutContext(ctx, content)
 		if err != nil {
 			return false, fmt.Errorf("cas put: %w", err)
 		}

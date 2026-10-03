@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package blob is the content-addressed store.
+// Package blob provides the local and explicitly configured remote
+// content-addressed stores.
 //
-// One implementation, filesystem-backed, sharded three levels deep:
+// The local implementation is filesystem-backed and sharded three levels deep:
 //
 //	$DATA_DIR/blobs/sha256/ab/cd/ef/abcdef...ff
 //
@@ -16,21 +17,21 @@
 package blob
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
 	pluginapi "github.com/johnnybravo-xyz/suchi/plugin-api"
 )
 
-// CAS is the filesystem content-addressed store.
+// CAS is the content-addressed store facade.
 type CAS struct {
-	root string // absolute path to blobs/sha256
+	root     string // absolute path to blobs/sha256
+	remote   RemoteBackend
+	tempRoot string // dedicated private working directory for remote objects
 }
 
 // ErrNotFound is returned by Get/Stat when the requested hash is absent.
@@ -58,74 +59,7 @@ func New(dir string) (*CAS, error) {
 // The temp file is created at the CAS root so the
 // final rename is always same-device (POSIX atomic).
 func (c *CAS) Put(r io.Reader) (pluginapi.BlobRef, error) {
-	// Bootstrap: we don't know the hash yet, so we can't pick the final
-	// shard until after we've read the stream. Use a top-level temp in
-	// the CAS root and move it into the shard directory once we know the
-	// hash. Same device (both under c.root) so rename remains atomic.
-	tmp, err := os.CreateTemp(c.root, ".put-*.tmp")
-	if err != nil {
-		return pluginapi.BlobRef{}, err
-	}
-	tmpName := tmp.Name()
-	// If anything fails between here and success, clean up the temp.
-	defer func() {
-		if tmpName != "" {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), r)
-	if err != nil {
-		_ = tmp.Close()
-		return pluginapi.BlobRef{}, fmt.Errorf("stream: %w", err)
-	}
-	// fsync so the rename below cannot land a torn write on power loss.
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return pluginapi.BlobRef{}, fmt.Errorf("fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return pluginapi.BlobRef{}, err
-	}
-
-	sum := hex.EncodeToString(h.Sum(nil))
-	dst := c.path(sum)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
-		return pluginapi.BlobRef{}, fmt.Errorf("mkdir shard: %w", err)
-	}
-
-	// Dedup: if the target already exists AND is the right size, keep it.
-	// A truncated pre-existing file would be caught by size mismatch; a
-	// forged file with the same size but wrong content would need a
-	// separate scrub tool, not a Put-time check.
-	if fi, statErr := os.Stat(dst); statErr == nil {
-		if fi.Size() == n {
-			_ = os.Remove(tmp.Name())
-			tmpName = ""
-			return pluginapi.BlobRef{SHA256: sum, Size: n}, nil
-		}
-		// Fall through — rename below will replace the corrupt one.
-	}
-
-	if err := installBlob(tmp.Name(), dst, n); err != nil {
-		return pluginapi.BlobRef{}, fmt.Errorf("rename: %w", err)
-	}
-	// A Windows rename loser leaves its temp in place; a successful rename does not.
-	_ = os.Remove(tmp.Name())
-	tmpName = ""
-
-	// Normalize permissions to 0640 — owner rw, group r. os.CreateTemp
-	// makes the file 0600; the chmod broadens to group so a sidecar
-	// (rendered-view, etc.) can serve blobs without root. Failure here
-	// is unusual (fs doesn't support chmod, or we're not the owner);
-	// return it so callers see a real diagnosis instead of a downstream
-	// "permission denied" on Get.
-	if err := os.Chmod(dst, 0o640); err != nil {
-		return pluginapi.BlobRef{}, fmt.Errorf("chmod %s: %w", dst, err)
-	}
-
-	return pluginapi.BlobRef{SHA256: sum, Size: n}, nil
+	return c.PutContext(context.Background(), r)
 }
 
 func installBlob(temporaryPath, destination string, size int64) error {
@@ -143,14 +77,7 @@ func installBlob(temporaryPath, destination string, size int64) error {
 
 // Get opens a blob for reading.
 func (c *CAS) Get(sum string) (io.ReadCloser, error) {
-	if !validHash(sum) {
-		return nil, fmt.Errorf("bad hash %q", sum)
-	}
-	f, err := os.Open(c.path(sum))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, ErrNotFound
-	}
-	return f, err
+	return c.GetContext(context.Background(), sum)
 }
 
 // Path returns a blob's absolute filesystem path for rendered-view symlinks.
@@ -164,52 +91,7 @@ func (c *CAS) Path(sum string) (string, error) {
 
 // Stat returns the BlobRef for a hash if it exists.
 func (c *CAS) Stat(sum string) (pluginapi.BlobRef, error) {
-	if !validHash(sum) {
-		return pluginapi.BlobRef{}, fmt.Errorf("bad hash %q", sum)
-	}
-	fi, err := os.Stat(c.path(sum))
-	if errors.Is(err, fs.ErrNotExist) {
-		return pluginapi.BlobRef{}, ErrNotFound
-	}
-	if err != nil {
-		return pluginapi.BlobRef{}, err
-	}
-	return pluginapi.BlobRef{SHA256: sum, Size: fi.Size()}, nil
-}
-
-// Delete removes the blob file. Returns nil for a hash that was already
-// gone — idempotent.
-func (c *CAS) Delete(sum string) error {
-	if !validHash(sum) {
-		return fmt.Errorf("bad hash %q", sum)
-	}
-	err := os.Remove(c.path(sum))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-// List walks every stored blob, calling fn with its ref. Order is
-// filesystem-defined, i.e. essentially undefined. Used by `suchi gc`.
-func (c *CAS) List(fn func(pluginapi.BlobRef) error) error {
-	return filepath.WalkDir(c.root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		name := d.Name()
-		if !validHash(name) {
-			return nil // skip stray files / temps
-		}
-		fi, err := d.Info()
-		if err != nil {
-			return err
-		}
-		return fn(pluginapi.BlobRef{SHA256: name, Size: fi.Size()})
-	})
+	return c.StatContext(context.Background(), sum)
 }
 
 // path returns the sharded path for a hash under the current

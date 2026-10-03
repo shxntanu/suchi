@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/config"
 	"github.com/johnnybravo-xyz/suchi/core/db"
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/gc"
 	"github.com/johnnybravo-xyz/suchi/core/logx"
+	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 )
 
 // runGC is the `suchi gc` subcommand. Reads-only against the DB;
@@ -56,7 +56,7 @@ func runGC(args []string) int {
 		return 1
 	}
 
-	cas, err := blob.New(cfg.DataDir)
+	cas, err := storage.New(ctx, cfg, false)
 	if err != nil {
 		log.Error("gc.cas", "err", err.Error())
 		return 1

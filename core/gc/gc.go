@@ -8,13 +8,14 @@
 //
 //  1. Collect every referenced sha from document content, previews,
 //     decrypted copies, and user avatars.
-//  2. Walk the CAS via CAS.List().
+//  2. Inventory the CAS via CAS.ListContext().
 //  3. Anything in the CAS that isn't in the reference set is a
 //     candidate for deletion.
-//  4. Skip blobs whose file mtime is newer than time.Now().Add(-grace).
+//  4. Skip blobs whose local or provider modification time is newer than the
+//     configured grace period (and skip unknown timestamps safely).
 //
-// gc never touches the DB — it only reads. Actual deletions are on
-// the filesystem via CAS.Delete.
+// gc never touches the DB beyond reading references. Actual deletions use
+// the configured CAS backend.
 //
 // Apply requires the server and every other archive writer to be stopped.
 // CAS.Put can reuse an old blob before its database reference is committed;
@@ -26,13 +27,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/db"
-	pluginapi "github.com/johnnybravo-xyz/suchi/plugin-api"
 )
 
 // Options carries the gc knobs. Zero value is a runnable dry-run.
@@ -71,7 +69,7 @@ type Failure struct {
 }
 
 // Run performs the mark-and-sweep. Apply is only safe with all writers stopped.
-func Run(ctx context.Context, d *db.DB, cas *blob.CAS, casRoot string, log *slog.Logger, opts Options) (*Report, error) {
+func Run(ctx context.Context, d *db.DB, cas *blob.CAS, _ string, log *slog.Logger, opts Options) (*Report, error) {
 	if opts.Grace == 0 {
 		opts.Grace = 30 * 24 * time.Hour
 	}
@@ -85,23 +83,30 @@ func Run(ctx context.Context, d *db.DB, cas *blob.CAS, casRoot string, log *slog
 
 	cutoff := time.Now().Add(-opts.Grace)
 
-	err = cas.List(func(b pluginapi.BlobRef) error {
+	var objects []blob.RemoteObject
+	err = cas.ListContext(ctx, func(object blob.RemoteObject) error {
+		objects = append(objects, object)
+		return nil
+	})
+	if err != nil {
+		return rep, fmt.Errorf("walk cas: %w", err)
+	}
+
+	for _, object := range objects {
+		if err := ctx.Err(); err != nil {
+			return rep, err
+		}
+		b := object.Ref
 		if ref[b.SHA256] {
-			return nil
+			continue
 		}
-		// Under grace? Skip. Same-device stat is cheap.
-		info, statErr := os.Stat(blobPath(casRoot, b.SHA256))
-		if statErr != nil {
-			// Race with a concurrent delete or scan glitch. Log at debug + skip.
-			log.Debug("gc.stat_failed", "sha", b.SHA256, "err", statErr.Error())
-			return nil
-		}
-		if info.ModTime().After(cutoff) {
+		// Unknown timestamps cannot safely pass a retention grace period.
+		if object.Modified.IsZero() || object.Modified.After(cutoff) {
 			rep.Skipped++
 			if opts.Verbose {
-				log.Info("gc.skip.grace", "sha", b.SHA256, "size", b.Size, "mtime", info.ModTime())
+				log.Info("gc.skip.grace", "sha", b.SHA256, "size", b.Size, "mtime", object.Modified)
 			}
-			return nil
+			continue
 		}
 		rep.OrphanCandidates++
 		rep.BytesReclaimable += b.Size
@@ -110,19 +115,18 @@ func Run(ctx context.Context, d *db.DB, cas *blob.CAS, casRoot string, log *slog
 			if opts.Verbose {
 				log.Info("gc.candidate", "sha", b.SHA256, "size", b.Size)
 			}
-			return nil
+			continue
 		}
-		if err := cas.Delete(b.SHA256); err != nil {
+		if err := cas.DeleteContext(ctx, b.SHA256); err != nil {
+			if ctx.Err() != nil {
+				return rep, ctx.Err()
+			}
 			rep.Failures = append(rep.Failures, Failure{SHA256: b.SHA256, Err: err.Error()})
 			log.Warn("gc.delete_failed", "sha", b.SHA256, "err", err.Error())
-			return nil
+			continue
 		}
 		rep.Deleted++
 		log.Info("gc.deleted", "sha", b.SHA256, "size", b.Size)
-		return nil
-	})
-	if err != nil {
-		return rep, fmt.Errorf("walk cas: %w", err)
 	}
 
 	log.Info("gc.done",
@@ -170,11 +174,4 @@ func CollectReferences(ctx context.Context, d *db.DB) (map[string]bool, error) {
 		}
 	}
 	return ref, nil
-}
-
-// blobPath re-derives the on-disk path for a hash. Duplicates the
-// sharding rule from core/blob but we don't want to grow the CAS
-// interface just for gc's mtime read. Keep in sync with CAS.path().
-func blobPath(casRoot, sum string) string {
-	return filepath.Join(casRoot, "blobs", "sha256", sum[0:2], sum[2:4], sum[4:6], sum)
 }

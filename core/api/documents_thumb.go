@@ -98,7 +98,7 @@ func (s *Server) GetDocumentThumb(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		rc, err := s.CAS.Get(sha.String)
+		rc, err := s.CAS.GetContext(r.Context(), sha.String)
 		if errors.Is(err, blob.ErrNotFound) {
 			s.writeError(w, http.StatusNotFound, "no_thumb", "thumbnail blob missing")
 			return
@@ -115,7 +115,7 @@ func (s *Server) GetDocumentThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc, err := s.CAS.Get(sha.String)
+	rc, err := s.CAS.GetContext(r.Context(), sha.String)
 	if errors.Is(err, blob.ErrNotFound) {
 		s.writeError(w, http.StatusNotFound, "no_thumb", "thumbnail blob missing")
 		return

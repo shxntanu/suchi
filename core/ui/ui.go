@@ -554,7 +554,7 @@ func (s *Server) serveBlob(w http.ResponseWriter, r *http.Request, preferArchive
 		http.NotFound(w, r)
 		return
 	}
-	rc, err := s.CAS.Get(pick)
+	rc, err := s.CAS.GetContext(r.Context(), pick)
 	if err != nil {
 		if errors.Is(err, blob.ErrNotFound) {
 			s.Log.Warn("ui.serveBlob.missing", "doc_id", id, "sha256", pick)

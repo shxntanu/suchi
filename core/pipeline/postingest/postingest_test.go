@@ -400,7 +400,7 @@ func TestHandleEmailRefinesGenericAttachmentMIME(t *testing.T) {
 			if mime != "application/pdf" {
 				t.Fatalf("attachment MIME = %q, want application/pdf from bytes", mime)
 			}
-			got, err := h.readBlob(sha)
+			got, err := h.readBlob(t.Context(), sha)
 			if err != nil || !bytes.Equal(got, source) {
 				t.Fatalf("attachment original changed: err=%v", err)
 			}

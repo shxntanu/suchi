@@ -76,7 +76,7 @@ func (s *Server) prepareUpload(
 		return nil
 	}
 
-	ref, err := s.CAS.Put(file)
+	ref, err := s.CAS.PutContext(r.Context(), file)
 	if err != nil {
 		s.Log.Error("api.upload.cas_put", "err", err.Error())
 		s.writeError(w, http.StatusInternalServerError, "cas_put_failed", "failed to store blob")

@@ -9,13 +9,13 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/config"
 	"github.com/johnnybravo-xyz/suchi/core/db"
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/importer/bundle"
 	"github.com/johnnybravo-xyz/suchi/core/jd"
 	"github.com/johnnybravo-xyz/suchi/core/logx"
+	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 )
 
 // runImport handles `suchi import [flags]`. Point --from at an export
@@ -111,7 +111,7 @@ func runImport(args []string) int {
 		return 1
 	}
 
-	cas, err := blob.New(cfg.DataDir)
+	cas, err := storage.New(ctx, cfg, true)
 	if err != nil {
 		log.Error("import.cas", "err", err.Error())
 		return 1

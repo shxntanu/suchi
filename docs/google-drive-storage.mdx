@@ -1,0 +1,126 @@
+---
+title: "Google Drive storage"
+description: "Keep document bytes in Drive and Suchi's catalog on persistent disk."
+---
+
+Suchi can store immutable originals, OCR outputs, thumbnails and avatars in an
+operator-owned Google Drive folder. SQLite, full-text search, jobs, account
+permissions and `.decrypt-key` remain under persistent `DATA_DIR`. Run one
+Suchi process for the archive.
+
+## Existing Aether credentials
+
+Reuse the same Google OAuth client ID, client secret and owner's refresh token.
+Do not combine a token from one OAuth client with another client's ID/secret.
+After loading your existing Aether deployment secrets in your shell, map them:
+
+```sh
+export STORAGE_PROVIDER=gdrive
+export GDRIVE_CLIENT_ID="$AETHER_GDRIVE_CLIENT_ID"
+export GDRIVE_CLIENT_SECRET="$AETHER_GDRIVE_CLIENT_SECRET"
+export GDRIVE_REFRESH_TOKEN="$AETHER_GDRIVE_REFRESH_TOKEN"
+export GDRIVE_FOLDER_ID="$AETHER_GDRIVE_FOLDER_ID"
+export DATA_DIR=/var/lib/suchi
+export PUBLIC_URL=https://your-suchi-host.example
+```
+
+Keep secrets in environment/secret mounts. The secret and refresh token also
+support `_FILE`. Suchi does not load sibling Aether environment files. Drive
+credentials authorize storage; Suchi user login is configured separately.
+The old Aether redirect URL is unnecessary for refreshing the existing token.
+
+The narrow `drive.file` scope grants per-file app access. Knowing a folder ID
+alone does not grant access. An inaccessible folder or expired/revoked token
+requires correcting the owner authorization; Suchi does not broaden scope or
+make files public. See [Google's scope documentation](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+
+Start `suchi serve` to validate the parent and create Suchi's marked child blob
+namespace. This child keeps Suchi's maintenance separate from Aether's files.
+After initial setup, `suchi doctor` checks owner credentials and namespace
+access without creating or mutating Drive files. These checks need connectivity
+to Google; local checks do not establish that a real token is valid.
+
+## Local disk and downloads
+
+Uploads spool to local working files while calculating SHA-256 and are durably
+stored in Drive before catalog publication. Downloads fetch and verify a whole
+blob into a seekable temporary file; closing the reader removes it. That supports
+existing previews, byte ranges, OCR and exports. Plan temporary free space for
+concurrent transfers and derived files; cold reads depend on network speed and
+Drive quota. This is remote object storage, not synchronization of Drive edits.
+
+`RENDER_DOCUMENT_VIEWS` defaults false with Drive and true with local storage.
+The web filing tree, saved views and search continue to work, and the small
+taxonomy index is still generated. Physical filesystem document symlinks need
+complete local targets. Setting `RENDER_DOCUMENT_VIEWS=true` retains verified
+local copies of their selected blobs and can require the full archive size.
+After enabling views and restarting Suchi, run `suchi refile --skip-automations`
+to enqueue projections for existing documents, including those processed while
+views were disabled. Use `--system` for each additional archive community.
+Disabling views does not delete old projections. Remove those offline only
+after confirming they are Suchi-managed and retaining any needed originals.
+
+## Migrate Aether documents
+
+First create Suchi's administrator and filing tree. With the Drive credentials
+above, verify the source and inspect projected bytes (dry-run reads originals
+but publishes no bundle):
+
+```sh
+suchi migrate-aether --out /private/path/aether-bundle --dry-run
+suchi migrate-aether --out /private/path/aether-bundle
+suchi import --from /private/path/aether-bundle --owner-email you@example.com --flat
+suchi rescan --only-no-ocr --dry-run --estimate
+suchi rescan --only-no-ocr --yes
+```
+
+Use a new private output directory. The converter reads Aether's ready originals
+and v1 manifests, checks sizes and SHA-256, and preserves titles, original names,
+timestamps and tags. Separate UUID paths allow documents with identical filenames
+to migrate without overwriting each other. It reports source-ID mappings and skipped states; missing
+or corrupt source objects produce a failed migration report. Import is resumable
+through stable legacy IDs. The generic bundle importer preserves metadata without
+scheduling extraction; the explicit rescan commands above enqueue OCR and derived
+content for the running server. Sessions and account roles are not migrated; assign
+the chosen Suchi owner explicitly. Review the report before importing personal
+documents and check representative downloads and metadata after import.
+
+The first import stores bytes in Suchi's own namespace, so allow Drive capacity
+for both archives. Aether originals/manifests remain untouched. Stop Aether
+uploads during inventory/export so the source does not change underneath the
+migration; Drive sidecars are not an atomic catalog backup. Keep Aether until
+the new archive is verified.
+
+## Switch an existing local Suchi archive
+
+Back up the whole local archive and stop every archive writer. With the Drive
+configuration active and `DATA_DIR` pointing at the existing archive:
+
+```sh
+suchi storage-transfer
+suchi storage-transfer --apply
+suchi serve
+suchi doctor --scrub-cas
+```
+
+Transfer verifies referenced local bytes and publishes them to Drive when
+`--apply` is explicit. It prepares pending catalog migrations before collecting
+references. Originals stay local for rollback. Remote startup rejects
+missing catalog references instead of silently serving an incomplete archive.
+To roll back, restore the complete retained local snapshot and select local
+storage. A provider switch alone does not transfer bytes.
+
+## Trash, GC and recovery
+
+Trash and retention purge change document metadata. They do not immediately
+delete Drive blobs because documents and versions can share them. Offline GC
+reclaims only unreferenced Suchi-owned objects, with all archive writers stopped.
+`doctor --scrub-cas` hashes remote bytes. Remote quarantine is unsupported and
+fails before mutation.
+
+A complete backup requires a consistent database, `.decrypt-key`, operator
+configuration and the corresponding Drive objects. Built-in database snapshots
+alone are incomplete. GC can remove objects needed by older snapshots, so keep
+a complete native export or independently back up the namespace. Restore with
+the same namespace and keys, then check downloads, search and sealed credentials.
+See [Backup and restore](/backup-restore).

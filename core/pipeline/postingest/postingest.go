@@ -314,7 +314,7 @@ func (h *Handler) Handle(ctx context.Context, e pluginapi.Event) error {
 	}
 	mime := input.MIME
 
-	origBytes, err := h.readBlob(input.OriginalBlob)
+	origBytes, err := h.readBlob(ctx, input.OriginalBlob)
 	if err != nil {
 		return fmt.Errorf("cas get %s: %w", input.OriginalBlob, err)
 	}
@@ -441,7 +441,7 @@ func (h *Handler) Handle(ctx context.Context, e pluginapi.Event) error {
 			return fmt.Errorf("image.ocr: %w", err)
 		}
 		if archiveBlob == "" {
-			ref, cerr := h.cas.Put(bytes.NewReader(pdfRes.PDF))
+			ref, cerr := h.cas.PutContext(ctx, bytes.NewReader(pdfRes.PDF))
 			if cerr != nil {
 				return fmt.Errorf("image.cas: %w", cerr)
 			}
@@ -770,7 +770,7 @@ func (h *Handler) extractSegment(ctx context.Context, log *slog.Logger, pdfBytes
 // The preceding CAS put may leave an unreferenced blob on failure; normal GC
 // reclaims it.
 func (h *Handler) createSplitChild(ctx context.Context, log *slog.Logger, parentID int64, index, total int, seg docsplit.Segment, segBytes []byte) error {
-	ref, err := h.cas.Put(bytes.NewReader(segBytes))
+	ref, err := h.cas.PutContext(ctx, bytes.NewReader(segBytes))
 	if err != nil {
 		return fmt.Errorf("cas put: %w", err)
 	}
@@ -1108,7 +1108,7 @@ func (h *Handler) attachEmailCorrespondent(ctx context.Context, docID int64, e *
 // lost). email_parent_id is set to nil when filesOnly so the
 // child doesn't dangle-point at a trashed row.
 func (h *Handler) createEmailAttachmentChild(ctx context.Context, log *slog.Logger, parentID, ownerID, jdCategoryID int64, index int, att eml.Attachment, parsed *eml.Email, filesOnly bool) error {
-	ref, err := h.cas.Put(bytes.NewReader(att.Bytes))
+	ref, err := h.cas.PutContext(ctx, bytes.NewReader(att.Bytes))
 	if err != nil {
 		return fmt.Errorf("cas put: %w", err)
 	}
@@ -1355,7 +1355,7 @@ func (h *Handler) markEncrypted(ctx context.Context, docID int64, stderr string)
 // blob, populates documents.decrypted_blob + decrypted_size + state,
 // and bumps last_used_at on the winning learned password (if any).
 func (h *Handler) recordDecrypted(ctx context.Context, log *slog.Logger, docID int64, pdfBytes []byte, sources []pwdSource, index int) error {
-	ref, err := h.cas.Put(bytes.NewReader(pdfBytes))
+	ref, err := h.cas.PutContext(ctx, bytes.NewReader(pdfBytes))
 	if err != nil {
 		return fmt.Errorf("cas put decrypted: %w", err)
 	}
@@ -1455,7 +1455,7 @@ func (h *Handler) runOCR(ctx context.Context, log *slog.Logger, pdfBytes []byte,
 				"reason", firstNonEmpty(res.StderrTail, "ocrmypdf skipped"))
 			return res.Text, "", 0, nil
 		}
-		ref, err := h.cas.Put(bytes.NewReader(res.ArchivePDF))
+		ref, err := h.cas.PutContext(ctx, bytes.NewReader(res.ArchivePDF))
 		if err != nil {
 			return "", "", 0, fmt.Errorf("cas put archive: %w", err)
 		}
@@ -1573,7 +1573,7 @@ func (h *Handler) generateThumb(ctx context.Context, log *slog.Logger, docID int
 	if blobSHA == "" {
 		return
 	}
-	rc, err := h.cas.Get(blobSHA)
+	rc, err := h.cas.GetContext(ctx, blobSHA)
 	if err != nil {
 		log.Warn("post-ingest.thumb.cas_get", "err", err.Error())
 		return
@@ -1593,7 +1593,7 @@ func (h *Handler) generateThumb(ctx context.Context, log *slog.Logger, docID int
 	if res.Skipped {
 		return
 	}
-	ref, err := h.cas.Put(bytes.NewReader(res.PNG))
+	ref, err := h.cas.PutContext(ctx, bytes.NewReader(res.PNG))
 	if err != nil {
 		log.Warn("post-ingest.thumb.cas_put", "err", err.Error())
 		return
@@ -1690,8 +1690,8 @@ func (h *Handler) loadDoc(ctx context.Context, id int64) (documentInput, error) 
 }
 
 // readBlob loads one pipeline input into memory.
-func (h *Handler) readBlob(sha string) ([]byte, error) {
-	rc, err := h.cas.Get(sha)
+func (h *Handler) readBlob(ctx context.Context, sha string) ([]byte, error) {
+	rc, err := h.cas.GetContext(ctx, sha)
 	if err != nil {
 		return nil, err
 	}

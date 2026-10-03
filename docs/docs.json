@@ -50,7 +50,7 @@
           },
           {
             "group": "Operations",
-            "pages": ["refile", "preconsume", "demo-instance", "backup-restore"]
+            "pages": ["refile", "preconsume", "demo-instance", "backup-restore", "google-drive-storage"]
           },
           {
             "group": "Guides",

@@ -455,7 +455,7 @@ func importDoc(ctx context.Context, d *db.DB, cas *blob.CAS, log *slog.Logger, o
 		if err != nil {
 			return docResult{}, err
 		}
-		ref, err := cas.Put(f)
+		ref, err := cas.PutContext(ctx, f)
 		f.Close()
 		if err != nil {
 			return docResult{}, fmt.Errorf("cas put original: %w", err)
@@ -473,7 +473,7 @@ func importDoc(ctx context.Context, d *db.DB, cas *blob.CAS, log *slog.Logger, o
 				if err != nil {
 					return docResult{}, err
 				}
-				ref, err := cas.Put(f)
+				ref, err := cas.PutContext(ctx, f)
 				f.Close()
 				if err != nil {
 					return docResult{}, fmt.Errorf("cas put archive: %w", err)

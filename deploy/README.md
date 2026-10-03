@@ -20,6 +20,12 @@ server exposed to the mobile app.
 
 All shapes assume the same three env vars are set on suchi:
 
+Optional [Google Drive storage](../docs/google-drive-storage.mdx) moves document
+bytes to an owned Drive namespace. Keep a persistent `DATA_DIR` for SQLite and
+keys, one server process, and temporary disk capacity for concurrent transfers.
+Physical document views default off with Drive; enabling them retains complete
+local copies. No Render, Cloudflare or external database setup is required.
+
 - `DATA_DIR` — where the SQLite database, CAS blobs, and rendered
   views live. Must be writable by the suchi process.
 - `LISTEN_ADDR` — usually `127.0.0.1:8000` behind a reverse proxy, or

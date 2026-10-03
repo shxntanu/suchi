@@ -753,7 +753,7 @@ func (s *Server) GetSharePublicDownload(w http.ResponseWriter, r *http.Request) 
 		s.writeError(w, http.StatusNotFound, "not_found", "no blob for document")
 		return
 	}
-	rc, err := s.CAS.Get(pick)
+	rc, err := s.CAS.GetContext(r.Context(), pick)
 	if err != nil {
 		s.serverErr(w, "share_links.download.cas", err)
 		return
