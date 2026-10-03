@@ -17,7 +17,10 @@ type RemoteObject struct {
 }
 
 // RemoteBackend persists immutable SHA-256 objects in an owned remote namespace.
-// Put must verify persistence before success; missing objects return ErrNotFound.
+// Put must confirm the persisted size and SHA-256 before success, using a
+// trusted provider checksum or a full readback. It must never replace bytes at
+// an existing hash. Get returns a stream; the CAS verifies it before exposure.
+// Missing objects return ErrNotFound.
 type RemoteBackend interface {
 	Put(context.Context, string, io.ReadSeeker, int64) error
 	Get(context.Context, string) (io.ReadCloser, error)
