@@ -14,6 +14,8 @@ import (
 	"sync"
 )
 
+var errParentEvidenceMissing = errors.New("no marked Aether file or Suchi namespace is visible directly under the parent")
+
 // Store is the Suchi blob backend scoped to one marked child folder.
 type Store struct {
 	drive       *driveClient
@@ -28,9 +30,12 @@ func New(ctx context.Context, config Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := drive.validateParent(ctx, config.FolderID); err != nil {
+	if err := drive.validateParent(ctx, config.FolderID); err != nil &&
+		(!config.CreateNamespace || !errors.Is(err, errParentEvidenceMissing)) {
 		return nil, err
 	}
+	// On first boot, allow an empty parent only when creation is enabled; the
+	// marked namespace must establish access by being verified after creation.
 	namespaceID, found, err := drive.findNamespace(ctx, config.FolderID)
 	if err != nil {
 		return nil, err
@@ -86,14 +91,12 @@ func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentI
 		return nil
 	}
 
-	namespaceQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' and value='%s' } and trashed = false",
-		escapeDriveQuery(parentID), namespaceProperty, namespacePropertyValue)
-	namespaceFiles, err := d.listFiles(ctx, namespaceQuery)
+	namespaceFiles, err := d.listMarkedChildren(ctx, parentID, namespaceProperty)
 	if err != nil {
 		return fmt.Errorf("list marked Suchi namespace children to verify the parent: %w", err)
 	}
 	if len(namespaceFiles) == 0 {
-		return errors.New("no marked Aether file or Suchi namespace is visible directly under the parent")
+		return errParentEvidenceMissing
 	}
 	for _, file := range namespaceFiles {
 		if file.ID == "" || file.AppProperties[namespaceProperty] != namespacePropertyValue ||
@@ -212,6 +215,11 @@ func (d *driveClient) createNamespace(ctx context.Context, parentID string) (str
 		return id, nil
 	}
 	if createErr != nil {
+		var statusErr apiStatusError
+		if errors.As(createErr, &statusErr) &&
+			(statusErr.status == http.StatusForbidden || statusErr.status == http.StatusNotFound) {
+			return "", fmt.Errorf("create Suchi Drive namespace; verify owner/app authorization to create children under the configured parent: %w", createErr)
+		}
 		return "", fmt.Errorf("create Suchi Drive namespace: %w", createErr)
 	}
 	if lookupErr != nil {
