@@ -118,12 +118,6 @@ type sourceEntry struct {
 	MD5           string
 }
 
-type stagedFilename struct {
-	Name  string
-	SHA   string
-	Entry *sourceEntry
-}
-
 // Run reads and verifies every Aether document manifest, then calculates the
 // number of unique original bytes Suchi would store. In dry-run mode it makes
 // no filesystem changes. Bundle publication is kept separate from inventory
@@ -250,8 +244,6 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 	projected := make(map[string]int64)
 	tagNames := make(map[string]struct{})
 	verified := make([]*sourceEntry, 0, len(valid))
-	filenames := make(map[string]stagedFilename)
-	filenameConflicts := make(map[string]bool)
 	for _, entry := range valid {
 		if err := ctx.Err(); err != nil {
 			return report, err
@@ -265,13 +257,10 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 			continue
 		}
 
-		filenameKey := strings.ToLower(entry.Document.OriginalFilename)
-		priorFilename, filenameSeen := filenames[filenameKey]
-		filenameConflict := filenameSeen && (priorFilename.Name != entry.Document.OriginalFilename || priorFilename.SHA != entry.Document.SHA256)
 		var stagedFile *os.File
 		var destination io.Writer = io.Discard
-		if stageDir != "" && !filenameSeen {
-			path := filepath.Join(stageDir, "originals", entry.Document.OriginalFilename)
+		if stageDir != "" {
+			path := filepath.Join(stageDir, "originals", entry.UUID)
 			stagedFile, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 			if err != nil {
 				addFailure(report, entry, "original could not be staged")
@@ -288,7 +277,7 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 				err = closeErr
 			}
 			if err != nil {
-				_ = os.Remove(filepath.Join(stageDir, "originals", entry.Document.OriginalFilename))
+				_ = os.Remove(filepath.Join(stageDir, "originals", entry.UUID))
 			}
 		}
 		if err != nil {
@@ -297,17 +286,6 @@ func Run(ctx context.Context, src Source, opts Options) (*Report, error) {
 			}
 			addFailure(report, entry, integrityReason(err))
 			continue
-		}
-		if filenameConflict {
-			if !filenameConflicts[filenameKey] {
-				addFailure(report, priorFilename.Entry, "different source objects share a bundle filename")
-				filenameConflicts[filenameKey] = true
-			}
-			addFailure(report, entry, "different source objects share a bundle filename")
-			continue
-		}
-		if !filenameSeen {
-			filenames[filenameKey] = stagedFilename{Name: entry.Document.OriginalFilename, SHA: sha, Entry: entry}
 		}
 		entry.SHA256 = sha
 		entry.MD5 = md5sum

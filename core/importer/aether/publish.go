@@ -73,6 +73,7 @@ func writeStagingBundle(stageDir string, documents []*sourceEntry, report *Repor
 			MimeType:         entry.Document.MediaType,
 			Checksum:         entry.MD5,
 			OriginalFilename: entry.Document.OriginalFilename,
+			OriginalPath:     entry.UUID,
 			Created:          created,
 			Modified:         entry.Document.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			Added:            created,
