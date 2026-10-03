@@ -34,6 +34,14 @@ alone does not grant access. An inaccessible folder or expired/revoked token
 requires correcting the owner authorization; Suchi does not broaden scope or
 make files public. See [Google's scope documentation](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 
+Folder metadata can be hidden with `drive.file` even when the app can access
+files it created inside that folder. If the parent metadata request returns
+404, Suchi checks for app-visible Aether files or a marked Suchi namespace
+whose returned parent matches the configured folder ID. This supports existing
+Aether archives with narrow credentials. Unmarked files, other parents and an
+empty inventory do not establish access; check the folder ID and owner/app
+authorization if validation still fails.
+
 Start `suchi serve` to validate the parent and create Suchi's marked child blob
 namespace. This child keeps Suchi's maintenance separate from Aether's files.
 After initial setup, `suchi doctor` checks owner credentials and namespace

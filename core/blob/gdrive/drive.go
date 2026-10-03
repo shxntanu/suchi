@@ -59,7 +59,7 @@ func (d *driveClient) validateParent(ctx context.Context, parentID string) error
 			return fmt.Errorf("read configured Google Drive parent folder: %w", err)
 		}
 		if childErr := d.validateParentThroughChildren(ctx, parentID); childErr != nil {
-			return fmt.Errorf("configured Google Drive parent metadata is unavailable; verify the folder ID and sharing permissions: %w", childErr)
+			return fmt.Errorf("configured Google Drive parent metadata is unavailable; verify the folder ID and owner/app authorization: %w", childErr)
 		}
 		return nil
 	}
@@ -70,7 +70,7 @@ func (d *driveClient) validateParent(ctx context.Context, parentID string) error
 }
 
 // validateParentThroughChildren supports drive.file grants that can list a
-// shared folder's app-created children while hiding the parent metadata.
+// parent's app-created children while hiding the parent metadata.
 func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentID string) error {
 	parentQuery := escapeDriveQuery(parentID)
 	aetherQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' } and trashed = false",

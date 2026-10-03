@@ -153,6 +153,10 @@ server/CLI factory. Context-aware puts finish remote publication before document
 transactions, and gets verify downloads in seekable temporary files removed on
 Close. SHA-256 references in SQLite remain provider-independent. Only the marked
 Suchi child namespace is mutable; Aether source migration is read-only.
+Parent validation normally reads folder metadata. For a 404 with narrow app
+access, it requires app-visible marked Aether/Suchi children whose returned
+parents contain the configured ID. Missing evidence fails startup; other HTTP
+errors retain their normal failure behavior.
 
 SQLite and keys remain local durable state. Drive mode defaults physical
 document views off while retaining taxonomy indexes and the web filing tree.
