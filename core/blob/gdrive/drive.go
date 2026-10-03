@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 )
 
@@ -53,12 +54,61 @@ func (d *driveClient) validateParent(ctx context.Context, parentID string) error
 	}
 	var parent driveFile
 	if err := d.getJSON(ctx, d.apiFileURL(parentID, query), &parent); err != nil {
-		return fmt.Errorf("read configured Google Drive parent folder: %w", err)
+		var statusErr apiStatusError
+		if !errors.As(err, &statusErr) || statusErr.status != http.StatusNotFound {
+			return fmt.Errorf("read configured Google Drive parent folder: %w", err)
+		}
+		if childErr := d.validateParentThroughChildren(ctx, parentID); childErr != nil {
+			return fmt.Errorf("configured Google Drive parent metadata is unavailable; verify the folder ID and sharing permissions: %w", childErr)
+		}
+		return nil
 	}
 	if parent.ID != parentID || parent.MIMEType != folderMIMEType || parent.Trashed {
 		return errors.New("configured Google Drive parent is missing, trashed, or not a folder")
 	}
 	return nil
+}
+
+// validateParentThroughChildren supports drive.file grants that can list a
+// shared folder's app-created children while hiding the parent metadata.
+func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentID string) error {
+	parentQuery := escapeDriveQuery(parentID)
+	aetherQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' } and trashed = false",
+		parentQuery, aetherStorageKey)
+	aetherFiles, err := d.listFiles(ctx, aetherQuery)
+	if err != nil {
+		return fmt.Errorf("list marked Aether children to verify the parent: %w", err)
+	}
+	if len(aetherFiles) > 0 {
+		for _, file := range aetherFiles {
+			if file.ID == "" || file.AppProperties[aetherStorageKey] == "" || file.Trashed ||
+				!hasParent(file, parentID) || !isBinaryDriveFile(file.MIMEType) {
+				return errors.New("marked Aether child metadata is malformed or outside the configured parent")
+			}
+		}
+		return nil
+	}
+
+	namespaceQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' and value='%s' } and trashed = false",
+		parentQuery, namespaceProperty, namespacePropertyValue)
+	namespaceFiles, err := d.listFiles(ctx, namespaceQuery)
+	if err != nil {
+		return fmt.Errorf("list marked Suchi namespace children to verify the parent: %w", err)
+	}
+	if len(namespaceFiles) == 0 {
+		return errors.New("no marked Aether file or Suchi namespace is visible directly under the parent")
+	}
+	for _, file := range namespaceFiles {
+		if file.ID == "" || file.AppProperties[namespaceProperty] != namespacePropertyValue ||
+			file.MIMEType != folderMIMEType || file.Trashed || !hasParent(file, parentID) {
+			return errors.New("marked Suchi namespace metadata is malformed or outside the configured parent")
+		}
+	}
+	return nil
+}
+
+func isBinaryDriveFile(mimeType string) bool {
+	return mimeType != "" && mimeType != folderMIMEType && !strings.HasPrefix(mimeType, "application/vnd.google-apps.")
 }
 
 func (d *driveClient) listFiles(ctx context.Context, q string) ([]driveFile, error) {
