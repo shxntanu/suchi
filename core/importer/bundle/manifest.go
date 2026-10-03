@@ -274,17 +274,20 @@ type DocumentFields struct {
 	Checksum         string  `json:"checksum"`         // md5 of original
 	ArchiveChecksum  *string `json:"archive_checksum"` // md5 of archive; nil when no archive
 	OriginalFilename string  `json:"original_filename"`
-	ArchiveFilename  *string `json:"archive_filename"`
-	StorageType      string  `json:"storage_type"`
-	ArchiveSerialNo  *int64  `json:"archive_serial_number"`
-	Created          string  `json:"created"`
-	Modified         string  `json:"modified"`
-	Added            string  `json:"added"`
-	Correspondent    *int64  `json:"correspondent"`
-	DocumentType     *int64  `json:"document_type"`
-	StoragePath      *int64  `json:"storage_path"`
-	Tags             []int64 `json:"tags"`
-	Owner            *int64  `json:"owner"`
+	// OriginalPath is Suchi's optional explicit path under originals/. It keeps
+	// source filenames intact when multiple documents have the same basename.
+	OriginalPath    string  `json:"original_path,omitempty"`
+	ArchiveFilename *string `json:"archive_filename"`
+	StorageType     string  `json:"storage_type"`
+	ArchiveSerialNo *int64  `json:"archive_serial_number"`
+	Created         string  `json:"created"`
+	Modified        string  `json:"modified"`
+	Added           string  `json:"added"`
+	Correspondent   *int64  `json:"correspondent"`
+	DocumentType    *int64  `json:"document_type"`
+	StoragePath     *int64  `json:"storage_path"`
+	Tags            []int64 `json:"tags"`
+	Owner           *int64  `json:"owner"`
 }
 
 // Model constants — the "documents.foo" strings that appear in the
@@ -319,7 +322,15 @@ const (
 //
 // The archive path uses the same fallback chain.
 func FilePaths(root string, d DocumentFields) (original string, archive string, err error) {
-	original, err = resolveExportedFile(root, "originals", d.OriginalFilename)
+	if d.OriginalPath != "" {
+		clean := filepath.Clean(d.OriginalPath)
+		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+			return "", "", fmt.Errorf("unsafe bundle original path %q", d.OriginalPath)
+		}
+		original, err = safeExistingBundleFile(filepath.Join(root, "originals"), filepath.Join(root, "originals", clean))
+	} else {
+		original, err = resolveExportedFile(root, "originals", d.OriginalFilename)
+	}
 	if err != nil {
 		return "", "", err
 	}
