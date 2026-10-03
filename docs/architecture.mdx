@@ -157,6 +157,10 @@ Parent validation normally reads folder metadata. For a 404 with narrow app
 access, it requires app-visible marked Aether/Suchi children whose returned
 parents contain the configured ID. Missing evidence fails startup; other HTTP
 errors retain their normal failure behavior.
+Inventories enumerate direct, untrashed children with pagination and filter
+private property markers locally; empty marked values still fail validation.
+Exact namespace/blob lookups retain key-and-value predicates. Bad-request
+diagnostics use fixed classifications without exposing raw provider messages.
 
 SQLite and keys remain local durable state. Drive mode defaults physical
 document views off while retaining taxonomy indexes and the web filing tree.

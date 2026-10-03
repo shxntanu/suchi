@@ -42,6 +42,12 @@ Aether archives with narrow credentials. Unmarked files, other parents and an
 empty inventory do not establish access; check the folder ID and owner/app
 authorization if validation still fails.
 
+Aether and blob inventories list direct, untrashed folder children across all
+pages, then filter private property markers locally. This avoids key-only
+`appProperties` queries. Exact namespace and blob lookups use both a key and a
+value. A Drive 400 error reports a recognized invalid query, field or parameter
+without logging Google's raw response or credential values.
+
 Start `suchi serve` to validate the parent and create Suchi's marked child blob
 namespace. This child keeps Suchi's maintenance separate from Aether's files.
 After initial setup, `suchi doctor` checks owner credentials and namespace

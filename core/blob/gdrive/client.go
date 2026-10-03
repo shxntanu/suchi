@@ -81,10 +81,14 @@ type filePage struct {
 }
 
 type apiStatusError struct {
-	status int
+	status     int
+	validation string
 }
 
 func (e apiStatusError) Error() string {
+	if e.status == http.StatusBadRequest && e.validation != "" {
+		return fmt.Sprintf("Google Drive request failed (400: %s)", e.validation)
+	}
 	switch e.status {
 	case http.StatusUnauthorized:
 		return "Google Drive rejected the OAuth token (401)"
@@ -254,8 +258,9 @@ func (c *driveClient) request(ctx context.Context, method, target string, body i
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := responseStatusError(resp)
 		_ = resp.Body.Close()
-		return nil, httpStatusError(resp.StatusCode)
+		return nil, err
 	}
 	return resp, nil
 }
@@ -289,6 +294,52 @@ func (c *driveClient) do(ctx context.Context, method, target string, body io.Rea
 
 func httpStatusError(status int) error {
 	return apiStatusError{status: status}
+}
+
+// responseStatusError classifies bad requests without logging Google's raw
+// message, which may echo request values. Only fixed labels and known field
+// names can appear in diagnostics. OAuth errors use their separate redaction.
+func responseStatusError(resp *http.Response) error {
+	err := apiStatusError{status: resp.StatusCode}
+	if resp.StatusCode != http.StatusBadRequest || resp.Body == nil {
+		return err
+	}
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+			Errors  []struct {
+				Message  string `json:"message"`
+				Location string `json:"location"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 32<<10)).Decode(&body) != nil {
+		return err
+	}
+	messages := []string{body.Error.Message}
+	for _, item := range body.Error.Errors {
+		messages = append(messages, item.Message)
+		switch item.Location {
+		case "q", "fields", "pageSize", "pageToken", "supportsAllDrives", "includeItemsFromAllDrives", "corpora", "spaces", "orderBy":
+			err.validation = "invalid " + item.Location + " parameter"
+		}
+	}
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message), "Invalid query") {
+			err.validation = "invalid file query"
+			return err
+		}
+		if strings.HasPrefix(message, "Invalid field selection") {
+			err.validation = "invalid response-field selection"
+			field := strings.TrimSpace(strings.TrimPrefix(message, "Invalid field selection"))
+			switch field {
+			case "id", "name", "mimeType", "parents", "trashed", "appProperties", "size", "sha256Checksum", "modifiedTime", "nextPageToken", "files":
+				err.validation += ": " + field
+			}
+			return err
+		}
+	}
+	return err
 }
 
 func (c *driveClient) apiURL(path string, query url.Values) string {
