@@ -280,9 +280,7 @@ func (s *Store) transferUpload(ctx context.Context, session string, source io.Re
 		}
 		headers := make(http.Header)
 		headers.Set("Content-Length", strconv.Itoa(len(data)))
-		if size == 0 {
-			headers.Set("Content-Range", "bytes */0")
-		} else {
+		if size > 0 {
 			headers.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", offset, end-1, size))
 		}
 		resp, requestErr := s.drive.do(ctx, http.MethodPut, session, bytes.NewReader(data), headers)
