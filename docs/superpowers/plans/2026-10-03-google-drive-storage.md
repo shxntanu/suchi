@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- Latest user steering: do not add unit tests. Remove newly added unit tests; validate with existing tests, build/vet and runtime checks. This supersedes every test-creation step below.
+
 - Default local behavior remains compatible; no new outbound connection in local mode.
 - One process owns an archive. Network I/O stays outside writer transactions.
 - Never copy Aether source or credentials into Suchi; all new source has AGPL SPDX headers.
