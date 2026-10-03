@@ -260,7 +260,7 @@ func (r *Renderer) resolveTarget(ctx context.Context, docID int64) (string, stri
 	if err := r.checkDocumentPath(rendered); err != nil {
 		return "", "", err
 	}
-	src, err := r.cas.Path(blobHash)
+	src, err := r.cas.MaterializeContext(ctx, blobHash)
 	if err != nil {
 		return "", "", fmt.Errorf("view.blob: %w", err)
 	}

@@ -320,7 +320,7 @@ func (s *Server) loadEncryptedDoc(r *http.Request, docID int64, p *pluginapi.Pri
 // (if req.Remember) seals the password for future auto-tries. Returns
 // errBadPassword when qpdf reports a wrong password.
 func (s *Server) attemptDecrypt(r *http.Request, docID, ownerID int64, blobSHA string, req DecryptRequest) error {
-	rc, err := s.decrypt.CAS.Get(blobSHA)
+	rc, err := s.decrypt.CAS.GetContext(r.Context(), blobSHA)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func (s *Server) attemptDecrypt(r *http.Request, docID, ownerID int64, blobSHA s
 		return errors.New("qpdf skipped: " + res.StderrTail)
 	}
 	// Put decrypted bytes into CAS + update doc row + re-enqueue post-ingest.
-	ref, err := s.decrypt.CAS.Put(bytes.NewReader(res.Data))
+	ref, err := s.decrypt.CAS.PutContext(r.Context(), bytes.NewReader(res.Data))
 	if err != nil {
 		return err
 	}

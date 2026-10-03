@@ -859,7 +859,7 @@ func (w *Watcher) importOne(ctx context.Context, raw []byte, msgID string, m *im
 		return outcomeIgnored, nil
 	}
 
-	ref, err := w.cas.Put(bytes.NewReader(raw))
+	ref, err := w.cas.PutContext(ctx, bytes.NewReader(raw))
 	if err != nil {
 		return outcomeSkipped, fmt.Errorf("cas put: %w", err)
 	}

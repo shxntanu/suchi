@@ -112,7 +112,7 @@ func (s *Server) PostSelfAvatar(w http.ResponseWriter, r *http.Request) {
 	encoded := out.Bytes()
 
 	// Store in CAS.
-	ref, err := s.CAS.Put(bytes.NewReader(encoded))
+	ref, err := s.CAS.PutContext(r.Context(), bytes.NewReader(encoded))
 	if err != nil {
 		s.serverErr(w, "avatar.cas_put", err)
 		return
@@ -181,7 +181,7 @@ func (s *Server) GetUserAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc, err := s.CAS.Get(sha)
+	rc, err := s.CAS.GetContext(r.Context(), sha)
 	if errors.Is(err, blob.ErrNotFound) {
 		// Sha in DB but blob missing — treat as no avatar so a
 		// broken CAS doesn't nuke the topbar.

@@ -343,19 +343,19 @@ func (w *Watcher) ingest(ctx context.Context, path string, side *sidecar.V1) (in
 		return 0, false, fmt.Errorf("open: %w", err)
 	}
 	defer f.Close()
-	ref, err := w.cas.Put(f)
+	ref, err := w.cas.PutContext(ctx, f)
 	if err != nil {
 		return 0, false, fmt.Errorf("cas put: %w", err)
 	}
 
 	// Sniff MIME on first 512 bytes of the stored blob (matches the
 	// upload API path — never trust the filename).
-	mime, err := w.sniffMIME(ref.SHA256)
+	mime, err := w.sniffMIME(ctx, ref.SHA256)
 	if err != nil {
 		w.log.Warn("fswatch.mime_sniff", "err", err.Error())
 		mime = "application/octet-stream"
 	}
-	if emlLooksLikeEmail(w.cas, ref.SHA256) {
+	if emlLooksLikeEmail(ctx, w.cas, ref.SHA256) {
 		mime = "message/rfc822"
 	}
 	mime = mimeutil.RefineByFilename(mime, path)
@@ -589,8 +589,8 @@ func (w *Watcher) moveToErrors(path, sidecarPath string, ingestErr error) {
 // extension (Maildir names are cryptic hash strings). Reads the
 // first 4 KiB of the CAS blob and asks the eml package whether the
 // header block has RFC-822 shape.
-func emlLooksLikeEmail(cas casReader, sha string) bool {
-	rc, err := cas.Get(sha)
+func emlLooksLikeEmail(ctx context.Context, cas casReader, sha string) bool {
+	rc, err := cas.GetContext(ctx, sha)
 	if err != nil {
 		return false
 	}
@@ -603,13 +603,13 @@ func emlLooksLikeEmail(cas casReader, sha string) bool {
 // casReader is the tiny surface emlLooksLikeEmail needs — avoids a
 // hard dependency on the concrete *blob.CAS type in this file.
 type casReader interface {
-	Get(sha string) (io.ReadCloser, error)
+	GetContext(context.Context, string) (io.ReadCloser, error)
 }
 
 // sniffMIME reads up to 512 bytes from the stored blob and runs
 // net/http.DetectContentType — same policy as the upload API.
-func (w *Watcher) sniffMIME(sha string) (string, error) {
-	rc, err := w.cas.Get(sha)
+func (w *Watcher) sniffMIME(ctx context.Context, sha string) (string, error) {
+	rc, err := w.cas.GetContext(ctx, sha)
 	if err != nil {
 		return "", err
 	}
