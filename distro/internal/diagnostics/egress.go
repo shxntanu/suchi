@@ -31,6 +31,10 @@ func EnumerateEgress(ctx context.Context, d *db.DB, cfg *config.Config, llmEndpo
 	if cfg.OIDCIssuerURL != "" {
 		add("oidc.discovery " + redactURL(cfg.OIDCIssuerURL, true))
 	}
+	if cfg.StorageProvider == "gdrive" {
+		add("storage.gdrive https://www.googleapis.com")
+		add("oauth.gdrive https://oauth2.googleapis.com")
+	}
 	var queryErrs []error
 	accounts, err := emailaccounts.ListEnabled(ctx, d)
 	if err != nil {

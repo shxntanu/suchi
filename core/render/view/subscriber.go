@@ -107,6 +107,10 @@ func NewHandler(r *Renderer) *Handler {
 	return &Handler{r: r}
 }
 
+// NewDisabledHandler acknowledges render jobs when physical document views
+// are disabled. Metadata mutators still enqueue their normal durable work.
+func NewDisabledHandler() *Handler { return &Handler{} }
+
 // Kinds implements pluginapi.Subscriber.
 func (h *Handler) Kinds() []string { return []string{Kind} }
 
@@ -114,5 +118,8 @@ func (h *Handler) Kinds() []string { return []string{Kind} }
 // Move is idempotent (same-path re-render is a no-op), so a job that
 // gets retried after a mid-move failure just retries the move.
 func (h *Handler) Handle(ctx context.Context, e pluginapi.Event) error {
+	if h.r == nil {
+		return ctx.Err()
+	}
 	return h.r.Move(ctx, e.DocID)
 }
