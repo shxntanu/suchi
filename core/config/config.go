@@ -21,13 +21,22 @@ import (
 
 // Config is the fully-resolved runtime configuration.
 type Config struct {
-	PublicURL      string
-	DataDir        string
-	ListenAddr     string
-	LogLevel       string
-	PprofEnabled   bool
-	BodyLimit      int64
-	BackupInterval time.Duration
+	// StorageProvider selects local filesystem storage or Google Drive.
+	StorageProvider string
+	// Drive storage credentials belong to one operator-owned OAuth client.
+	GDriveClientID     string
+	GDriveClientSecret string
+	GDriveRefreshToken string
+	GDriveFolderID     string
+	// RenderDocumentViews publishes local symlink projections. Drive defaults off.
+	RenderDocumentViews bool
+	PublicURL           string
+	DataDir             string
+	ListenAddr          string
+	LogLevel            string
+	PprofEnabled        bool
+	BodyLimit           int64
+	BackupInterval      time.Duration
 	// TrustedProxyCIDRs enables forwarded client addresses for rate limiting
 	// only when the direct TCP peer belongs to an explicitly trusted network.
 	TrustedProxyCIDRs []netip.Prefix
@@ -341,6 +350,9 @@ func Load() (*Config, error) {
 		if c.AdminEmail == "" {
 			return nil, errors.New("ADMIN_EMAIL is required when OIDC is enabled")
 		}
+	}
+	if err := c.loadStorage(); err != nil {
+		return nil, err
 	}
 
 	return c, nil
