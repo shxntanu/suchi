@@ -72,10 +72,7 @@ func (d *driveClient) validateParent(ctx context.Context, parentID string) error
 // validateParentThroughChildren supports drive.file grants that can list a
 // parent's app-created children while hiding the parent metadata.
 func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentID string) error {
-	parentQuery := escapeDriveQuery(parentID)
-	aetherQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' } and trashed = false",
-		parentQuery, aetherStorageKey)
-	aetherFiles, err := d.listFiles(ctx, aetherQuery)
+	aetherFiles, err := d.listMarkedChildren(ctx, parentID, aetherStorageKey)
 	if err != nil {
 		return fmt.Errorf("list marked Aether children to verify the parent: %w", err)
 	}
@@ -90,7 +87,7 @@ func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentI
 	}
 
 	namespaceQuery := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' and value='%s' } and trashed = false",
-		parentQuery, namespaceProperty, namespacePropertyValue)
+		escapeDriveQuery(parentID), namespaceProperty, namespacePropertyValue)
 	namespaceFiles, err := d.listFiles(ctx, namespaceQuery)
 	if err != nil {
 		return fmt.Errorf("list marked Suchi namespace children to verify the parent: %w", err)
@@ -109,6 +106,24 @@ func (d *driveClient) validateParentThroughChildren(ctx context.Context, parentI
 
 func isBinaryDriveFile(mimeType string) bool {
 	return mimeType != "" && mimeType != folderMIMEType && !strings.HasPrefix(mimeType, "application/vnd.google-apps.")
+}
+
+// listMarkedChildren enumerates direct, untrashed children and filters their
+// private app properties locally. Drive may reject appProperties key-only q
+// predicates for private properties, while the file metadata remains visible.
+func (d *driveClient) listMarkedChildren(ctx context.Context, parentID, property string) ([]driveFile, error) {
+	q := fmt.Sprintf("'%s' in parents and trashed = false", escapeDriveQuery(parentID))
+	files, err := d.listFiles(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	marked := make([]driveFile, 0, len(files))
+	for _, file := range files {
+		if _, exists := file.AppProperties[property]; exists {
+			marked = append(marked, file)
+		}
+	}
+	return marked, nil
 }
 
 func (d *driveClient) listFiles(ctx context.Context, q string) ([]driveFile, error) {
@@ -243,9 +258,7 @@ func (s *Store) validateBlobFile(sum string, file driveFile) error {
 }
 
 func (s *Store) ownedBlobs(ctx context.Context) ([]driveFile, error) {
-	q := fmt.Sprintf("'%s' in parents and appProperties has { key='%s' } and trashed = false",
-		escapeDriveQuery(s.namespaceID), blobProperty)
-	files, err := s.drive.listFiles(ctx, q)
+	files, err := s.drive.listMarkedChildren(ctx, s.namespaceID, blobProperty)
 	if err != nil {
 		return nil, err
 	}
