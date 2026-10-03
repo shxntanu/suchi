@@ -54,6 +54,9 @@ The web filing tree, saved views and search continue to work, and the small
 taxonomy index is still generated. Physical filesystem document symlinks need
 complete local targets. Setting `RENDER_DOCUMENT_VIEWS=true` retains verified
 local copies of their selected blobs and can require the full archive size.
+After enabling views and restarting Suchi, run `suchi refile --skip-automations`
+to enqueue projections for existing documents, including those processed while
+views were disabled. Use `--system` for each additional archive community.
 Disabling views does not delete old projections. Remove those offline only
 after confirming they are Suchi-managed and retaining any needed originals.
 
@@ -101,7 +104,8 @@ suchi doctor --scrub-cas
 ```
 
 Transfer verifies referenced local bytes and publishes them to Drive when
-`--apply` is explicit. Originals stay local for rollback. Remote startup rejects
+`--apply` is explicit. It prepares pending catalog migrations before collecting
+references. Originals stay local for rollback. Remote startup rejects
 missing catalog references instead of silently serving an incomplete archive.
 To roll back, restore the complete retained local snapshot and select local
 storage. A provider switch alone does not transfer bytes.

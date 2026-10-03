@@ -11,15 +11,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/blob/gdrive"
 	"github.com/johnnybravo-xyz/suchi/core/config"
 	"github.com/johnnybravo-xyz/suchi/core/db"
+	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/gc"
 	"github.com/johnnybravo-xyz/suchi/core/importer/aether"
+	"github.com/johnnybravo-xyz/suchi/core/logx"
 	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 )
 
@@ -39,7 +43,8 @@ func runMigrateAether(args []string) int {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	source, err := gdrive.NewSource(ctx, storage.DriveConfig(cfg, false))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Aether Drive source:", err)
@@ -78,7 +83,8 @@ func runStorageTransfer(args []string) int {
 		fmt.Fprintln(os.Stderr, "storage-transfer requires STORAGE_PROVIDER=gdrive")
 		return 2
 	}
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	// Require an existing catalog; a typo must not create a new empty archive.
 	dbPath := filepath.Join(cfg.DataDir, "suchi.db")
 	if _, err := os.Stat(dbPath); err != nil {
@@ -91,6 +97,10 @@ func runStorageTransfer(args []string) int {
 		return 1
 	}
 	defer d.Close()
+	if err := migrations.Prepare(ctx, d, logx.Setup(os.Stderr, cfg.LogLevel)); err != nil {
+		fmt.Fprintln(os.Stderr, "catalog preparation:", err)
+		return 1
+	}
 	refs, err := gc.CollectReferences(ctx, d)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "references:", err)

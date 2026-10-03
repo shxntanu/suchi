@@ -33,7 +33,7 @@
 
 ## Task 1: Drive adapter and source reader (parallel lane A)
 
-**Files:** Create `core/blob/gdrive/*.go` and tests. No changes outside this directory.
+**Files:** Create `core/blob/gdrive/*.go`. No changes outside this directory.
 
 **Interfaces:** Implement the predeclared `blob.RemoteBackend` in `remote_contract.go`:
 `Put(ctx, sum, io.ReadSeeker, size) error`, `Get(ctx,sum) (io.ReadCloser,error)`,
@@ -47,15 +47,15 @@ Produce `gdrive.Config` with `ClientID`, `ClientSecret`, `RefreshToken`, `Folder
 `List(context.Context) (map[string]string,error)` returning Aether storage key to file ID,
 and `Open(context.Context,string) (io.ReadCloser,error)` opening a listed file ID.
 
-- [ ] Write failing fake-HTTP tests for OAuth, parent validation, marked child folder, immutable dedup, checksums, resumable uploads including empty bytes, offsets/retries, hostile upload URLs, read/list/delete, pagination, duplicate keys and secret redaction.
-- [ ] Run `go test ./core/blob/gdrive` and record the expected initial failure.
-- [ ] Implement auth/namespace/read inventory first; commit this complete stage.
-- [ ] Implement resumable uploads, integrity and bounded retry behavior; commit this stage.
-- [ ] Run focused tests, race tests, gofmt and vet; report commits, verification and limitations.
+- [x] Omit new unit tests as explicitly requested; use existing suites and manual checks.
+- [x] Compile the new package and record existing-suite verification in the task report.
+- [x] Implement auth/namespace/read inventory first; commit this complete stage.
+- [x] Implement resumable uploads, integrity and bounded retry behavior; commit this stage.
+- [x] Run focused tests, race tests, gofmt and vet; report commits, verification and limitations.
 
 ## Task 2: Remote CAS and maintenance (parallel lane B)
 
-**Files:** Modify/create `core/blob/*.go`, `core/gc/gc.go`, affected tests only.
+**Files:** Modify/create `core/blob/*.go`, `core/gc/gc.go`, existing test call signatures only.
 
 **Interfaces:** Consume `RemoteBackend`. Produce `NewRemote(dir string, backend RemoteBackend) (*CAS,error)`;
 `PutContext(context.Context,io.Reader) (pluginapi.BlobRef,error)`;
@@ -67,15 +67,15 @@ and `Open(context.Context,string) (io.ReadCloser,error)` opening a listed file I
 `IsRemote() bool`. Existing methods call context variants with Background and preserve local semantics.
 `Path` stays pure. Remote Get returns a seekable reader cleaned up on Close.
 
-- [ ] Write failing backend-fake tests for hashing, remote commit before success, seekability, checksum failures, cancellation, temp cleanup, local compatibility and materialization.
-- [ ] Run `go test ./core/blob ./core/gc` and record the initial contract failure.
-- [ ] Implement remote Put/Get/Stat and temporary-file lifecycle; commit the stage.
-- [ ] Implement remote List/Delete/Scrub and adapt GC grace to backend modification times. Reject remote quarantine before mutation. Commit maintenance stage.
-- [ ] Verify blob/GC tests, concurrency with race, gofmt and vet. Report staged commits and concerns.
+- [x] Omit new unit tests as explicitly requested; use existing suites and manual checks.
+- [x] Compile the new package and record existing-suite verification in the task report.
+- [x] Implement remote Put/Get/Stat and temporary-file lifecycle; commit the stage.
+- [x] Implement remote List/Delete/Scrub and adapt GC grace to backend modification times. Reject remote quarantine before mutation. Commit maintenance stage.
+- [x] Verify blob/GC tests, concurrency with race, gofmt and vet. Report staged commits and concerns.
 
 ## Task 3: Aether-to-bundle converter (parallel lane C)
 
-**Files:** Create `core/importer/aether/*.go` and tests only.
+**Files:** Create `core/importer/aether/*.go` only.
 
 **Interfaces:** Produce `Source` interface with `List(context.Context) (map[string]string,error)` and
 `Open(context.Context,string) (io.ReadCloser,error)`; compatible with Task 1's source.
@@ -83,11 +83,11 @@ Produce `Options{OutputDir string, DryRun bool}`, `Report` containing document/t
 counts, `ProjectedBytes int64`, mapping records and diagnostics; and
 `Run(context.Context,Source,Options) (*Report,error)`.
 
-- [ ] Write failing fixture tests for valid v1 Aether sidecars, original pairing, checksum/size verification, tags/title/filename/timestamps, skipped non-ready states, malformed UUID/schema, missing manifest/original, traversal, refusal to overwrite, cancellation, deterministic identifiers/collision handling and importer compatibility.
-- [ ] Run focused tests and record expected initial failures.
-- [ ] Implement read-only inventory and dry-run projected-byte report; commit stage.
-- [ ] Implement exclusive output bundle publication and mapping report; commit stage.
-- [ ] Verify produced bundles with existing bundle loader/importer tests, gofmt and vet; report commits and limitations.
+- [x] Omit new unit tests as explicitly requested; use existing suites and manual checks.
+- [x] Compile the new package and record existing-suite verification in the task report.
+- [x] Implement read-only inventory and dry-run projected-byte report; commit stage.
+- [x] Implement exclusive output bundle publication and mapping report; commit stage.
+- [x] Verify produced bundles with existing bundle loader/importer tests, gofmt and vet; report commits and limitations.
 
 ## Task 4: Runtime configuration, rendering and CLI integration (controller)
 
@@ -100,20 +100,24 @@ uses Task 1 and 2. Config adds provider/Drive fields and resolved `RenderDocumen
 CLI adds `suchi migrate-aether --out <dir> [--dry-run]` using Task 3;
 and `suchi storage-transfer --apply` for stopped-writer local-to-Drive publication.
 
-- [ ] Add failing configuration tests for default/provider validation, incomplete secrets and rendering defaults.
-- [ ] Wire storage creation in server and all CLI producers/consumers; use request/job contexts.
-- [ ] Handle disabled document render jobs deliberately, preserve taxonomy index; materialize opt-in link targets outside write transactions.
-- [ ] Add migration and transfer CLI contracts: dry-run counts, safe explicit apply, source verification, no accidental local fallback and no secret output.
-- [ ] Add egress/doctor reporting, source-safe GC/scrub behavior and end-to-end fake-Drive upload/download/range/export checks.
-- [ ] Commit integration in stages, then run affected tests and race tests.
+- [x] Omit new unit tests as explicitly requested; use existing suites and manual checks.
+- [x] Wire storage creation in server and all CLI producers/consumers; use request/job contexts.
+- [x] Handle disabled document render jobs deliberately, preserve taxonomy index; materialize opt-in link targets outside write transactions.
+- [x] Add migration and transfer CLI contracts: dry-run counts, safe explicit apply, source verification, no accidental local fallback and no secret output.
+- [x] Add egress/doctor reporting and source-safe GC/scrub. Existing local consumer suites and manual adapter/converter smoke checks cover the available offline validation; live Drive requests remain blocked by DNS.
+- [x] Commit integration in stages, then run affected tests and race tests.
 
 ## Task 5: Documentation, review and verification
 
 **Files:** `.env.sample`, `CHANGELOG.md`, `docs/config.mdx`, `docs/architecture.mdx`,
 `docs/backup-restore.mdx`, `docs/cli.mdx`, `deploy/README.md`, new Drive runbook.
 
-- [ ] Document exact credential mapping, separate namespaces, physical-view disk requirements, complete backups, migration/rollback and working-file latency.
-- [ ] Run `make check` and `make smoke`; report missing tools/network dependencies rather than bypassing failed checks.
-- [ ] Independently review each task and the integrated diff; fix material findings with regression coverage.
-- [ ] Attempt read-only live compatibility probe if network permits, never log secrets or count mocks as live success.
-- [ ] Commit final documentation and fixes; leave feature branch reviewable without publishing or merging.
+- [x] Document exact credential mapping, separate namespaces, physical-view disk requirements, complete backups, migration/rollback and working-file latency.
+- [x] Run `make check` and `make smoke`; report missing tools/network dependencies rather than bypassing failed checks.
+- [x] Independently review each task and the integrated diff; fix material findings with existing checks and manual verification. No new unit tests.
+- [x] Attempt read-only live compatibility probe if network permits, never log secrets or count mocks as live success.
+- [x] Commit final documentation and fixes; leave feature branch reviewable without publishing or merging.
+
+## Verification outcome
+
+The production binary builds. Existing focused suites and race checks pass. All-module vet, formatting, license checks and documentation metadata checks pass. `make check` was attempted: localhost listeners are forbidden by the sandbox, causing existing API/mail/app/CLI/demo/OIDC/classifier tests to fail. `make smoke` built and reached server startup but failed at the forbidden localhost bind. Staticcheck could not be downloaded because DNS is blocked; UI checks require unavailable Bun. Live OAuth refresh failed at DNS before authorization, so the existing Aether credentials remain unverified. No real Drive data was changed or migrated.
