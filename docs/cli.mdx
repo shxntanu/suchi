@@ -31,7 +31,8 @@ Runs the HTTP server. Blocks until SIGINT/SIGTERM.
 ## `suchi migrate-aether --out DIR [--dry-run]`
 
 Read Aether v1 sidecars and originals using configured `GDRIVE_*` credentials.
-Dry-run reports inventory and projected bytes. Normal execution verifies source
+Dry-run verifies source bytes and reports inventory/projected bytes without
+publishing a bundle. Normal execution verifies source
 SHA-256 and creates a new import bundle plus a migration report; it refuses
 overwrites and never modifies Aether files. Import the reviewed bundle with
 `suchi import --from DIR --owner-email EMAIL`. See [Drive migration](/google-drive-storage).

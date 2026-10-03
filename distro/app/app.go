@@ -21,7 +21,6 @@ import (
 	"github.com/johnnybravo-xyz/suchi/core/auth"
 	"github.com/johnnybravo-xyz/suchi/core/automations"
 	"github.com/johnnybravo-xyz/suchi/core/backup"
-	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/config"
 	suchicrypto "github.com/johnnybravo-xyz/suchi/core/crypto"
 	"github.com/johnnybravo-xyz/suchi/core/db"
@@ -41,6 +40,7 @@ import (
 	"github.com/johnnybravo-xyz/suchi/core/trash"
 	"github.com/johnnybravo-xyz/suchi/distro/demo"
 	"github.com/johnnybravo-xyz/suchi/distro/internal/diagnostics"
+	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 	pluginapi "github.com/johnnybravo-xyz/suchi/plugin-api"
 	llmclassifier "github.com/johnnybravo-xyz/suchi/plugins/llm-classifier"
 	localauth "github.com/johnnybravo-xyz/suchi/plugins/local-auth"
@@ -285,20 +285,27 @@ func Run(ctx context.Context, opts Options) error {
 		authChain.Authenticators = append(authChain.Authenticators, demoAnon)
 	}
 
-	cas, err := blob.New(cfg.DataDir)
+	if err := storage.CleanupWorkingFiles(cfg); err != nil {
+		return fmt.Errorf("storage working-file cleanup: %w", err)
+	}
+	cas, err := storage.New(ctx, cfg, true)
 	if err != nil {
 		log.Error("main.cas", "err", err.Error())
 		return fmt.Errorf("main.cas: %w", err)
 	}
 
-	renderer, err := view.New(d, cas, cfg.DataDir+"/rendered", log)
-	if err != nil {
-		log.Error("main.view.new", "err", err.Error())
-		return fmt.Errorf("main.view.new: %w", err)
+	if err := storage.ValidateReferences(ctx, d, cas); err != nil {
+		return fmt.Errorf("storage references: %w", err)
 	}
-	// Render recovery is best effort; normal processing can continue.
-	if err := renderer.Reconcile(ctx); err != nil {
-		log.Warn("main.view.reconcile", "err", err.Error())
+	var renderer *view.Renderer
+	if cfg.RenderDocumentViews || cfg.StorageProvider == "" {
+		renderer, err = view.New(d, cas, cfg.DataDir+"/rendered", log)
+		if err != nil {
+			return fmt.Errorf("main.view.new: %w", err)
+		}
+		if err := renderer.Reconcile(ctx); err != nil {
+			log.Warn("main.view.reconcile", "err", err.Error())
+		}
 	}
 	trashService, err := trash.New(d, cfg.DataDir+"/rendered", log)
 	if err != nil {
@@ -401,7 +408,11 @@ func Run(ctx context.Context, opts Options) error {
 		postingest.WithPreConsume(cfg.PreConsumeScript),
 	))
 	disp.Register(llmclassifier.NewHandler(llm, d, log))
-	disp.Register(view.NewHandler(renderer))
+	if renderer == nil {
+		disp.Register(view.NewDisabledHandler())
+	} else {
+		disp.Register(view.NewHandler(renderer))
+	}
 	if err := configureTaxonomyIndex(ctx, d, disp, log, cfg.DataDir+"/rendered"); err != nil {
 		log.Error("taxonomy.index.startup", "err", err)
 		return fmt.Errorf("taxonomy.index.startup: %w", err)

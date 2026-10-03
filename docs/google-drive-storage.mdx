@@ -38,7 +38,7 @@ Start `suchi serve` to validate the parent and create Suchi's marked child blob
 namespace. This child keeps Suchi's maintenance separate from Aether's files.
 After initial setup, `suchi doctor` checks owner credentials and namespace
 access without creating or mutating Drive files. These checks need connectivity
-to Google; mocked tests do not establish that a real token is valid.
+to Google; local checks do not establish that a real token is valid.
 
 ## Local disk and downloads
 
@@ -60,7 +60,8 @@ after confirming they are Suchi-managed and retaining any needed originals.
 ## Migrate Aether documents
 
 First create Suchi's administrator and filing tree. With the Drive credentials
-above, inspect the source sidecars and projected bytes:
+above, verify the source and inspect projected bytes (dry-run reads originals
+but publishes no bundle):
 
 ```sh
 suchi migrate-aether --out /private/path/aether-bundle --dry-run
@@ -72,7 +73,8 @@ suchi rescan --only-no-ocr --yes
 
 Use a new private output directory. The converter reads Aether's ready originals
 and v1 manifests, checks sizes and SHA-256, and preserves titles, original names,
-timestamps and tags. It reports source-ID mappings and skipped states; missing
+timestamps and tags. Separate UUID paths allow documents with identical filenames
+to migrate without overwriting each other. It reports source-ID mappings and skipped states; missing
 or corrupt source objects produce a failed migration report. Import is resumable
 through stable legacy IDs. The generic bundle importer preserves metadata without
 scheduling extraction; the explicit rescan commands above enqueue OCR and derived

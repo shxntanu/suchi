@@ -85,6 +85,10 @@ func main() {
 		os.Exit(runDemo(os.Args[2:]))
 	case "export":
 		os.Exit(runExport(os.Args[2:]))
+	case "migrate-aether":
+		os.Exit(runMigrateAether(os.Args[2:]))
+	case "storage-transfer":
+		os.Exit(runStorageTransfer(os.Args[2:]))
 	case "refile":
 		os.Exit(runRefile(os.Args[2:]))
 	case "rescan":
@@ -138,6 +142,8 @@ Usage:
   suchi refile [flags]            re-run automations + enqueue re-render on every live doc after filing changes
   suchi rescan [flags]            re-run content extraction on selected docs (--stale/--jd/--tag/…; --dry-run + --estimate first)
   suchi export --out FILE.zip     write a portable takeout of documents + taxonomy (optionally --owner-id N or --all)
+  suchi migrate-aether --out DIR  convert Aether Drive originals and sidecars to an import bundle
+  suchi storage-transfer [flags]  verify/publish local archive blobs to Drive (dry-run default)
   suchi version                   print version + build info
 
 Configuration uses environment variables or a HuML/TOML file; see docs.

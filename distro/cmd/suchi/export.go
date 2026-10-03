@@ -71,6 +71,7 @@ import (
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/jd/systems"
 	"github.com/johnnybravo-xyz/suchi/core/logx"
+	"github.com/johnnybravo-xyz/suchi/distro/internal/storage"
 )
 
 // exportManifest is the archive-level provenance record.
@@ -166,7 +167,7 @@ func runExport(args []string) int {
 		log.Error("export.migrate", "err", err.Error())
 		return 1
 	}
-	cas, err := blob.New(cfg.DataDir)
+	cas, err := storage.New(ctx, cfg, false)
 	if err != nil {
 		log.Error("export.cas", "err", err.Error())
 		return 1
@@ -498,7 +499,7 @@ func dumpDocuments(ctx context.Context, zw *zip.Writer, d *db.DB, cas *blob.CAS,
 			return written, skipped, err
 		}
 
-		rc, err := cas.Get(blobSHA)
+		rc, err := cas.GetContext(ctx, blobSHA)
 		if errors.Is(err, blob.ErrNotFound) {
 			log.Warn("export.blob.missing", "doc_id", id, "sha", blobSHA)
 			skipped++
