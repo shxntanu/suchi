@@ -5,6 +5,9 @@ Notable user-visible changes to Suchi are recorded here.
 ## [Unreleased]
 ### Added
 
+- Document optional direct remote Turso libSQL metadata using
+  `TURSO_DATABASE_URL` and secret `TURSO_AUTH_TOKEN`, while keeping local
+  SQLite as the default and requiring separate durable storage for archive files.
 - Add optional Google Drive storage for immutable originals and derived bytes,
   with verified seekable working files and local SQLite/credential keys.
 - Add read-only Aether-to-import-bundle migration and an offline verified

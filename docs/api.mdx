@@ -2283,7 +2283,9 @@ and archive content are never returned.
 `GET /api/admin/settings/preferences` returns the effective backup interval and
 OCR language list. `POST` to the same path with
 `{backup_interval_hours, ocr_languages}` resets the backup scheduler and
-replaces the language snapshot used by future OCR jobs immediately.
+replaces the language snapshot used by future OCR jobs immediately. In remote
+Turso mode the effective backup interval is zero because local SQLite snapshots
+and their coupled audit pruning are disabled.
 
 `GET /api/admin/settings/ingest` returns the watched directory, owner and target
 system. `POST` with `{fs_watch_dir,fs_watch_owner_email,fs_watch_system}` validates

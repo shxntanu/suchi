@@ -23,7 +23,6 @@ import (
 
 	"github.com/johnnybravo-xyz/suchi/core/automations"
 	"github.com/johnnybravo-xyz/suchi/core/config"
-	"github.com/johnnybravo-xyz/suchi/core/db"
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/logx"
 	"github.com/johnnybravo-xyz/suchi/core/refile"
@@ -50,7 +49,7 @@ func runRefile(args []string) int {
 	slog.SetDefault(log)
 
 	ctx := context.Background()
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
 		return 1

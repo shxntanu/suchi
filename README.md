@@ -17,9 +17,10 @@
   <a href="https://suchi.page"><img alt="Homepage" src="https://img.shields.io/badge/site-suchi.page-007ec6"></a>
 </p>
 
-Suchi combines SQLite, content-addressed storage, a Svelte interface, and an
-integration-friendly HTTP API. It needs no database server, queue, cache, or
-telemetry service.
+Suchi combines SQLite by default, content-addressed storage, a Svelte interface,
+and an integration-friendly HTTP API. Local mode needs no database server,
+queue, cache, or telemetry service; an optional Turso mode provides remote SQL
+metadata for deployments that need it.
 
 The content-addressed store keeps immutable original and derived bytes under
 their SHA-256 digest. Identical bytes can share one stored object, retries do not
@@ -167,6 +168,7 @@ and selected job, backup, audit, upload-limit, and CAS indicators.
 - [Filing systems and taxonomy imports](docs/jd.mdx)
 - [Supported file types](docs/formats.mdx)
 - [Deployment templates](deploy/README.md)
+- [Render with Turso](deploy/render/README.md)
 - [Backup and restore](docs/backup-restore.mdx)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

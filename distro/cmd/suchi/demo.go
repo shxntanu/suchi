@@ -83,7 +83,7 @@ func runDemo(args []string) int {
 		return 0
 	}
 
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
 		return 1

@@ -84,7 +84,7 @@ func runImport(args []string) int {
 
 	ctx := context.Background()
 
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		log.Error("import.db.open", "err", err.Error())
 		return 1
@@ -186,7 +186,7 @@ func runImportVerify(bundleRoot, systemCode string) int {
 	slog.SetDefault(log)
 
 	ctx := context.Background()
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		log.Error("verify.db.open", "err", err.Error())
 		return 1

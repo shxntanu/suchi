@@ -16,6 +16,7 @@ server exposed to the mobile app.
 | [`nginx/`](nginx/suchi.conf) | Server block for nginx. Assumes certificates already exist at the paths shown — provision them however you already do. |
 | [`traefik/`](traefik/) | Dynamic-config snippet for Traefik. Assumes an existing `websecure` entrypoint and cert resolver. |
 | [`k8s/`](k8s/) | Single-replica Deployment + PVC + ClusterIP Service. **SQLite is single-writer** — do not scale replicas up. |
+| [`render/`](render/README.md) | Render deployment notes for optional Turso remote SQL metadata and the separate file-durability requirements. |
 | [`mail-mbsync/`](mail-mbsync/) | The mail-intake sidecar reference deployment. Docker Compose flavor. |
 
 All shapes assume the same three env vars are set on suchi:
@@ -24,9 +25,9 @@ Optional [Google Drive storage](../docs/google-drive-storage.mdx) moves document
 bytes to an owned Drive namespace. Keep a persistent `DATA_DIR` for SQLite and
 keys, one server process, and temporary disk capacity for concurrent transfers.
 Physical document views default off with Drive; enabling them retains complete
-local copies. No Render, Cloudflare or external database setup is required.
+local copies. Render-specific requirements are in the [Render guide](render/README.md).
 
-- `DATA_DIR` — where the SQLite database, CAS blobs, and rendered
+- `DATA_DIR` — where the SQLite database (when local mode is selected), CAS blobs, and rendered
   views live. Must be writable by the suchi process.
 - `LISTEN_ADDR` — usually `127.0.0.1:8000` behind a reverse proxy, or
   `0.0.0.0:8000` inside a container.

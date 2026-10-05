@@ -5,8 +5,10 @@ description: "Runtime ownership, document flow, storage and security invariants,
 
 Suchi captures, extracts, files, retrieves and reviews documents locally. Each
 step remains useful without an LLM or external service. The production runtime
-is one static Go binary with an embedded Svelte app, SQLite, immutable CAS blobs
-and rebuildable filing views under `DATA_DIR`; no database server, cache or broker.
+is one static Go binary with an embedded Svelte app, SQLite by default (or
+optional remote Turso libSQL metadata), immutable CAS blobs and rebuildable
+filing views under `DATA_DIR`; local mode needs no database server, cache or
+broker.
 
 This guide describes the current checkout. Confirm contracts against
 source and tests. [Frontend architecture](/spa-architecture) owns
@@ -46,7 +48,8 @@ cancellation, loads the tagged pipeline-proposal policy, then calls
 neither parses command arguments nor exits the process.
 Follow `distro/app.Run` to diagnose runtime wiring:
 
-1. Create `DATA_DIR`, open SQLite and apply public core migrations.
+1. Create `DATA_DIR`, open the configured database (local SQLite by default or
+   direct remote Turso libSQL), and apply public core migrations there.
 2. Apply supplied `MigrationSets` in declaration order, each with its own ledger.
 3. Construct one immutable automation registry from explicit `BuiltinActions()`
    plus supplied `Actions`; duplicate or incomplete definitions stop startup.
@@ -81,8 +84,10 @@ Each assembled instance passes its approvals engine explicitly to
 review validation, audit and retry logic remain with `core/approvals`, while
 independently assembled instances remain isolated.
 
-One server process owns an archive. The writer pool and startup reclamation do
-not coordinate multiple servers sharing SQLite.
+One Suchi server process owns an archive in either database mode. The single
+serialized Suchi writer and startup reclamation do not coordinate multiple
+Suchi servers sharing SQLite or a Turso database. Turso is not a multi-writer
+coordination mechanism for Suchi.
 
 Build version/revision resolve once at boot and enter authenticated `/api/whoami`
 metadata. Docker receives revision explicitly because its context excludes `.git`.
@@ -95,7 +100,7 @@ flowchart LR
   I[Upload or intake] --> B[Original bytes in CAS]
   B --> T[Commit document, source, first job] --> J[Durable dispatcher]
   J --> P[Extract and normalize] --> F[File and review]
-  P --> S[(SQLite text and metadata)]
+  P --> S[(SQLite or Turso libSQL metadata)]
   P --> D[Derived CAS objects]
   F --> S --> A[ACL-filtered retrieval]
   D --> A --> C[Web app and API clients]
@@ -177,11 +182,29 @@ provider; configured Drive OAuth/API destinations enter the egress inventory.
 See [Drive storage](/google-drive-storage) for configuration, migration, backups
 and disk/latency limitations.
 
-`DB.Write` has one connection; `DB.Read` has a small pool. Both use the same WAL
-SQLite file with foreign keys, busy timeout and bounded mmap. Mutations use
-`WriteTx`; participating helpers receive its `*sql.Tx`. Re-entering the writer
-from its transaction deadlocks on the held connection. Deferred rollback releases
-it after errors or panics, including when callers recover.
+`core/db` owns SQL connection and transaction behavior. Local mode uses the
+existing SQLite pools. When both `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are
+configured, it uses `github.com/tursodatabase/libsql-client-go` through
+`database/sql` for direct remote libSQL access; there is no embedded replica.
+The client is pure Go and keeps CGO disabled. Its upstream deprecates the Go
+remote client, which currently supplies Suchi's direct remote route. The
+adapter stays at the database boundary so a future client replacement remains
+an implementation concern. Remote SQL owns metadata and migrations; CAS,
+credential keys, rendered projections, staging, and working files remain
+separate file-backed state. Thus the remote database does not make an ephemeral
+host filesystem durable. Remote connection or authentication failures stop
+startup; Suchi does not silently start against a new local database.
+
+`DB.Write` has one connection; `DB.Read` has a small pool. In local mode both
+use the same WAL SQLite file with foreign keys, busy timeout and bounded mmap.
+Mutations use `WriteTx`; participating helpers receive its `*sql.Tx`. Re-entering
+the writer from its transaction deadlocks on the held connection. Deferred
+rollback releases it after errors or panics, including when callers recover.
+Remote mode preserves one serialized Suchi writer over remote SQL transactions;
+network failures are returned to callers and ambiguous commits are not
+automatically replayed. The local SQLite transaction behavior remains unchanged.
+Periodic local snapshots and their coupled audit pruning are disabled when the
+database is remote; use Turso's recovery for metadata.
 
 Keep network calls, subprocesses and long processing outside write transactions.
 Enqueue required work with the state change, never as a later best-effort write.
@@ -302,8 +325,10 @@ to an unreferenced historical archive when ownership cannot be established.
 Restored absolute links with a known hash and the beta.1/beta.2 two-shard or
 current three-shard CAS layout may be repaired. Render-only refile changes projections
 without OCR/classifier/filing reruns. [Backup and restore](/backup-restore) requires
-all of `DATA_DIR`, including credential keys, with writers stopped or an atomic
-whole-directory snapshot; a database-only copy is incomplete.
+all file-backed archive state, including credential keys, with writers stopped
+or an atomic whole-directory snapshot. In local mode this includes the database;
+in Turso mode, recover the remote metadata database separately. A database-only
+copy is incomplete in either mode.
 
 The active catalog in `core/db/migrations/` contains one declarative
 `0001_baseline.sql`: the complete v0.1.0 schema at `user_version = 1` with the

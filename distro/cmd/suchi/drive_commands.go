@@ -19,7 +19,6 @@ import (
 	"github.com/johnnybravo-xyz/suchi/core/blob"
 	"github.com/johnnybravo-xyz/suchi/core/blob/gdrive"
 	"github.com/johnnybravo-xyz/suchi/core/config"
-	"github.com/johnnybravo-xyz/suchi/core/db"
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/gc"
 	"github.com/johnnybravo-xyz/suchi/core/importer/aether"
@@ -91,7 +90,7 @@ func runStorageTransfer(args []string) int {
 		fmt.Fprintln(os.Stderr, "existing catalog:", err)
 		return 1
 	}
-	d, err := db.Open(ctx, dbPath)
+	d, err := openConfiguredDB(ctx, cfg, dbPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "catalog:", err)
 		return 1

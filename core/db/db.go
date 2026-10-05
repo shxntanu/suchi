@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package db is suchi's SQLite bootstrap.
+// Package db owns Suchi's local SQLite and optional remote libSQL bootstrap.
 //
-// The rule of the house: **one writer, many readers.** SQLite serializes
-// writes at the file level; if two connections try to write concurrently
-// one of them gets SQLITE_BUSY and we spend the next six months chasing
-// ghosts. We prevent that structurally with two connection pools:
+// The rule of the house: **one writer, many readers.** The write pool has one
+// connection so Suchi serializes mutations before they reach either local
+// SQLite or remote libSQL:
 //
-//   - DB.Write:  MaxOpenConns=1, BEGIN IMMEDIATE, busy_timeout=5000ms.
+//   - DB.Write:  one connection; local SQLite uses BEGIN IMMEDIATE and
+//     remote libSQL relies on the driver's transaction handling.
 //     All writes go through this handle. It queues; it does not race.
-//   - DB.Read:   MaxOpenConns=4, WAL readers concurrent with the writer.
+//   - DB.Read:   MaxOpenConns=4 for concurrent readers.
 //
-// Both pools point at the same file. Both apply the boot pragmas below.
-// The write pool additionally applies "PRAGMA foreign_keys=ON" per
-// connection because SQLite scopes that pragma per-connection, not
-// per-database.
+// Local pools point at the same file and apply boot pragmas. Remote pools
+// connect directly to the configured libSQL database. The local write pool
+// additionally applies "PRAGMA foreign_keys=ON" per connection because
+// SQLite scopes that pragma per-connection, not per-database.
 package db
 
 import (
@@ -26,20 +26,45 @@ import (
 	"path/filepath"
 	"time"
 
+	libsql "github.com/tursodatabase/libsql-client-go/libsql"
 	_ "modernc.org/sqlite"
 )
 
 // DB is the pair of pools plus the file path. Close closes both.
 type DB struct {
-	Write *sql.DB
-	Read  *sql.DB
-	Path  string
+	Write  *sql.DB
+	Read   *sql.DB
+	Path   string
+	Remote bool
+}
+
+// OpenOptions selects local SQLite (zero value) or direct remote libSQL.
+type OpenOptions struct {
+	TursoURL   string
+	TursoToken string
 }
 
 // Open opens (or creates) the SQLite database at path and returns the
 // two-pool handle. The caller is responsible for running migrations
 // before serving traffic.
 func Open(ctx context.Context, path string) (*DB, error) {
+	return OpenWithOptions(ctx, path, OpenOptions{})
+}
+
+// OpenWithOptions opens the configured database and returns the two-pool
+// handle. Remote mode uses Turso as the metadata authority; Path remains the
+// local data directory's conventional database path for diagnostics only.
+func OpenWithOptions(ctx context.Context, path string, opts OpenOptions) (*DB, error) {
+	if opts.TursoURL != "" || opts.TursoToken != "" {
+		if opts.TursoURL == "" || opts.TursoToken == "" {
+			return nil, errors.New("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must both be set")
+		}
+		return openRemote(ctx, path, opts)
+	}
+	return openLocal(ctx, path)
+}
+
+func openLocal(ctx context.Context, path string) (*DB, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve db path: %w", err)
@@ -105,28 +130,71 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	return &DB{Write: write, Read: read, Path: abs}, nil
 }
 
+func openRemote(ctx context.Context, path string, opts OpenOptions) (*DB, error) {
+	parsed, err := url.Parse(opts.TursoURL)
+	if err != nil || parsed.Scheme != "libsql" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New("TURSO_DATABASE_URL must be a libsql:// URL without credentials, query, or fragment")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve db path: %w", err)
+	}
+	newRemotePool := func(maxOpen int) (*sql.DB, error) {
+		connector, err := libsql.NewConnector(opts.TursoURL, libsql.WithAuthToken(opts.TursoToken))
+		if err != nil {
+			return nil, errors.New("configure Turso connector")
+		}
+		db := sql.OpenDB(connector)
+		db.SetMaxOpenConns(maxOpen)
+		db.SetMaxIdleConns(maxOpen)
+		db.SetConnMaxIdleTime(5 * time.Minute)
+		if maxOpen == 1 {
+			db.SetConnMaxLifetime(0)
+		}
+		if err := ping(ctx, db); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("Turso connection failed: %w", err)
+		}
+		return db, nil
+	}
+	write, err := newRemotePool(1)
+	if err != nil {
+		return nil, fmt.Errorf("open Turso write pool: %w", err)
+	}
+	read, err := newRemotePool(4)
+	if err != nil {
+		_ = write.Close()
+		return nil, fmt.Errorf("open Turso read pool: %w", err)
+	}
+	return &DB{Write: write, Read: read, Path: abs, Remote: true}, nil
+}
+
 // Close closes both pools. Errors from either are joined.
 func (d *DB) Close() error {
 	return errors.Join(d.Write.Close(), d.Read.Close())
 }
 
-// WriteTx runs fn inside a BEGIN IMMEDIATE transaction on the write pool.
-// BEGIN IMMEDIATE acquires the RESERVED lock up front so we fail fast
-// against a concurrent writer instead of discovering the conflict at
-// COMMIT time (which is the SQLite footgun the single-writer pool exists
-// to avoid — but IMMEDIATE keeps the discipline explicit).
+// WriteTx runs fn inside a transaction on the serialized write pool. Local
+// SQLite begins with BEGIN IMMEDIATE to acquire its RESERVED lock up front;
+// remote libSQL uses the driver's standard transaction API.
 func (d *DB) WriteTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := d.Write.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelSerializable,
-	})
+	var tx *sql.Tx
+	var err error
+	if d.Remote {
+		tx, err = d.Write.BeginTx(ctx, nil)
+	} else {
+		tx, err = d.Write.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	}
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	// modernc/sqlite honors LevelSerializable as BEGIN, not BEGIN IMMEDIATE.
-	// Force it explicitly so our discipline is what we say it is.
-	if _, err := tx.ExecContext(ctx, "ROLLBACK; BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("begin immediate: %w", err)
+	if !d.Remote {
+		// modernc/sqlite honors LevelSerializable as BEGIN, not BEGIN IMMEDIATE.
+		// Force it explicitly so our local SQLite discipline is preserved.
+		if _, err := tx.ExecContext(ctx, "ROLLBACK; BEGIN IMMEDIATE"); err != nil {
+			return fmt.Errorf("begin immediate: %w", err)
+		}
 	}
 	if err := fn(tx); err != nil {
 		return err

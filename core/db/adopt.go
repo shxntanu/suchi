@@ -103,13 +103,21 @@ func PrepareStable(ctx context.Context, d *DB, stable, compatibility []Migration
 		return fmt.Errorf("validate %s before adoption: %w", profile.name, err)
 	}
 
-	snapshot, err := createAdoptionSnapshot(ctx, d)
-	if err != nil {
-		return fmt.Errorf("create pre-adoption snapshot: %w", err)
+	snapshot := ""
+	if !d.Remote {
+		snapshot, err = createAdoptionSnapshot(ctx, d)
+		if err != nil {
+			return fmt.Errorf("create pre-adoption snapshot: %w", err)
+		}
+		log.Info("db.stable_adoption.snapshot", "source", profile.name, "path", snapshot)
+	} else {
+		log.Info("db.stable_adoption.snapshot_skipped", "source", profile.name, "reason", "remote database")
 	}
-	log.Info("db.stable_adoption.snapshot", "source", profile.name, "path", snapshot)
-	if err := adoptBeta(ctx, d, beta, profile.nextVersion); err != nil {
-		return fmt.Errorf("adopt %s (snapshot retained at %s): %w", profile.name, snapshot, err)
+	if err := adoptBeta(ctx, d, beta, profile.nextVersion, stable[0]); err != nil {
+		if snapshot != "" {
+			return fmt.Errorf("adopt %s (snapshot retained at %s): %w", profile.name, snapshot, err)
+		}
+		return fmt.Errorf("adopt %s: %w", profile.name, err)
 	}
 	log.Info("db.stable_adoption.complete", "source", profile.name, "schema", stableLineage)
 	return nil
@@ -134,9 +142,11 @@ func validateStableCatalogs(stable, compatibility []Migration) ([]Migration, err
 
 func inspectSchema(ctx context.Context, q schemaQueryer) (schemaState, error) {
 	var state schemaState
-	if err := q.QueryRowContext(ctx, "PRAGMA user_version").Scan(&state.version); err != nil {
+	version, err := readCoreVersion(ctx, q)
+	if err != nil {
 		return state, err
 	}
+	state.version = version
 	fingerprint, count, err := schemaFingerprint(ctx, q)
 	if err != nil {
 		return state, err
@@ -176,13 +186,17 @@ func classifyBeta(state schemaState) (betaProfile, bool) {
 	}
 }
 
-func adoptBeta(ctx context.Context, d *DB, compatibility []Migration, nextVersion int) error {
-	return rebuildTx(ctx, d.Write, func(tx *sql.Tx) error {
+func adoptBeta(ctx context.Context, d *DB, compatibility []Migration, nextVersion int, stableMigration Migration) error {
+	return rebuildTx(ctx, d, func(tx *sql.Tx) error {
 		for _, migration := range compatibility {
 			if migration.Version < nextVersion {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
+			sqlText, err := migrationSQL(migration.SQL, d.Remote)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, sqlText); err != nil {
 				return fmt.Errorf("compatibility migration %d %s: %w", migration.Version, migration.Name, err)
 			}
 		}
@@ -197,8 +211,8 @@ func adoptBeta(ctx context.Context, d *DB, compatibility []Migration, nextVersio
 		if changed != 1 {
 			return fmt.Errorf("set stable lineage: changed %d rows, want 1", changed)
 		}
-		if _, err := tx.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
-			return fmt.Errorf("set stable user_version: %w", err)
+		if err := setCoreMigrationVersion(ctx, tx, stableMigration); err != nil {
+			return fmt.Errorf("record stable schema version: %w", err)
 		}
 		if err := checkIntegrity(ctx, tx); err != nil {
 			return err

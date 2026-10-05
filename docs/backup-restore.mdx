@@ -5,18 +5,26 @@ description: "Create a consistent backup of the database, blobs, and credential 
 
 Suchi keeps persistent application state under `DATA_DIR`:
 
+When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` select remote mode, Turso is
+the metadata authority instead of the local `suchi.db`. The rest of the archive
+still needs its own durability and recovery plan: Turso does not persist CAS
+blobs, `.decrypt-key`, rendered files, staging, or working files. In particular,
+Turso alone does not make a Render Free deployment safe for user documents.
+
 With [Google Drive storage](/google-drive-storage), original and derived bytes
 live in Suchi's marked Drive namespace; local `blobs/` may contain only optional
-materialized view targets. A complete backup must include the corresponding
-Drive objects along with a consistent SQLite snapshot, `.decrypt-key` and
-configuration. Local working files are disposable. Built-in database snapshots
-remain database-only; remote GC can reclaim objects an older snapshot needs.
+materialized view targets. In local database mode, a complete backup must
+include a consistent SQLite snapshot. In Turso mode, back up the remote
+metadata database separately. In either mode, include the corresponding
+document bytes, `.decrypt-key` and configuration. Local working files are
+disposable. Built-in database snapshots remain database-only; remote GC can
+reclaim objects an older snapshot needs.
 
 ```text
 $DATA_DIR/
-  suchi.db              SQLite metadata, users, jobs, FTS, and audit events
-  suchi.db-wal          live SQLite WAL file
-  suchi.db-shm          live SQLite shared-memory file
+  suchi.db              local SQLite metadata, users, jobs, FTS, and audit events
+  suchi.db-wal          live local SQLite WAL file
+  suchi.db-shm          live local SQLite shared-memory file
   blobs/                original and derived content-addressed files
   rendered/             rebuildable filing-tree projection
   backups/              built-in database snapshots
@@ -26,13 +34,15 @@ $DATA_DIR/
 
 ## What a complete backup needs
 
-Back up a consistent `suchi.db` snapshot together with `blobs/`,
-`.decrypt-key`, and any operator configuration stored in the
-directory. The database without `blobs/` has metadata but no document bytes.
+In local database mode, back up a consistent `suchi.db` snapshot together with
+`blobs/`, `.decrypt-key`, and any operator configuration stored in the
+directory. In Turso mode, back up remote metadata with the provider's supported
+recovery process, separately from those file-backed items. Metadata without
+`blobs/` has no document bytes.
 The database without `.decrypt-key` cannot open sealed mailbox, OAuth,
 PDF-password, or LLM credentials.
 
-`rendered/` is generated state and can be rebuilt. A cleanly stopped database
+`rendered/` is generated state and can be rebuilt. A cleanly stopped local database
 does not need its WAL or shared-memory files. An atomic snapshot of a live
 archive must include the database and its WAL together; never copy them at
 different times.
@@ -48,6 +58,13 @@ A complete backup is **whole-instance**: systems share SQLite, CAS and credentia
 keys. It preserves membership, ACLs, document/version/link relationships and the
 global document-ID high-water state. Host/backup operators can access every system
 and remain trusted; a filing prefix is not backup isolation or per-system encryption.
+
+With Turso mode, arrange provider-supported backup and recovery for the remote
+metadata database separately from Suchi's file backup. Restore a consistent
+Turso metadata state together with the corresponding CAS blobs, `.decrypt-key`,
+and operator configuration. Suchi's filesystem `VACUUM INTO` snapshots are for
+local SQLite and do not back up remote metadata. A remote database backup alone
+cannot restore document bytes or sealed credentials.
 Native takeout manifest v2 selects one system and is deliberately partial; source
 addresses do not request preservation of IDs when documents are ingested again.
 

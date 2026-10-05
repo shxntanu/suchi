@@ -82,16 +82,16 @@ func MigrateSet(ctx context.Context, d *DB, set MigrationSet, log *slog.Logger) 
 			if err != sql.ErrNoRows {
 				return err
 			}
-			var coreVersion int
-			if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&coreVersion); err != nil {
-				return fmt.Errorf("read core user_version: %w", err)
+			coreVersion, err := readCoreVersion(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("read core schema version: %w", err)
 			}
 			if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
 				return err
 			}
-			var afterCoreVersion int
-			if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&afterCoreVersion); err != nil {
-				return fmt.Errorf("re-read core user_version: %w", err)
+			afterCoreVersion, err := readCoreVersion(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("re-read core schema version: %w", err)
 			}
 			if afterCoreVersion != coreVersion {
 				return fmt.Errorf("changed core user_version from %d to %d", coreVersion, afterCoreVersion)
@@ -104,7 +104,7 @@ func MigrateSet(ctx context.Context, d *DB, set MigrationSet, log *slog.Logger) 
 		}
 		var err error
 		if migration.RebuildTables {
-			err = rebuildTx(ctx, d.Write, apply)
+			err = rebuildTx(ctx, d, apply)
 		} else {
 			err = d.WriteTx(ctx, apply)
 		}

@@ -97,7 +97,7 @@ func runDoctor(args []string) int {
 		}
 		fmt.Println("  ✓ Drive owner authorization and namespace are accessible")
 	}
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  ✗ open DB: %v\n", err)
 		return 1

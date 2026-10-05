@@ -11,11 +11,15 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+var remoteUserVersionStatement = regexp.MustCompile(`(?im)^[\t ]*PRAGMA[\t ]+user_version[\t ]*=[\t ]*[0-9]+[\t ]*;?[\t ]*(?:\r?\n|$)`)
+var remoteUserVersionAssignment = regexp.MustCompile(`(?i)\bPRAGMA\s+user_version\s*=`)
 
 // Migration is one forward step. Down migrations are intentionally NOT
 // supported — production rollbacks are file-restore-from-snapshot, not
@@ -124,9 +128,9 @@ func Migrate(ctx context.Context, d *DB, migs []Migration, log *slog.Logger) err
 		}
 	}
 
-	var current int
-	if err := d.Write.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
-		return fmt.Errorf("read user_version: %w", err)
+	current, err := readCoreVersion(ctx, d.Write)
+	if err != nil {
+		return fmt.Errorf("read core schema version: %w", err)
 	}
 	target := migs[len(migs)-1].Version
 	if current > target {
@@ -138,7 +142,7 @@ func Migrate(ctx context.Context, d *DB, migs []Migration, log *slog.Logger) err
 		if m.Version <= current {
 			continue
 		}
-		if err := applyOne(ctx, d.Write, m); err != nil {
+		if err := applyOne(ctx, d, m); err != nil {
 			return fmt.Errorf("migration %d %s: %w", m.Version, m.Name, err)
 		}
 		log.Info("db.migrate.applied", "version", m.Version, "name", m.Name)
@@ -146,39 +150,72 @@ func Migrate(ctx context.Context, d *DB, migs []Migration, log *slog.Logger) err
 	return nil
 }
 
-func applyOne(ctx context.Context, db *sql.DB, m Migration) error {
+func applyOne(ctx context.Context, d *DB, m Migration) error {
 	if m.RebuildTables {
-		return rebuildTx(ctx, db, func(tx *sql.Tx) error {
-			if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+		return rebuildTx(ctx, d, func(tx *sql.Tx) error {
+			sqlText, err := migrationSQL(m.SQL, d.Remote)
+			if err != nil {
 				return err
 			}
-			_, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(m.Version))
-			return err
+			if _, err := tx.ExecContext(ctx, sqlText); err != nil {
+				return err
+			}
+			return setCoreMigrationVersion(ctx, tx, m)
 		})
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
+	sqlText, err := migrationSQL(m.SQL, d.Remote)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, sqlText); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	// PRAGMA user_version does not accept a bound parameter — it's a
 	// statement, not a query. Concatenation is safe because Version is
 	// an int extracted from the filename we own.
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(m.Version)); err != nil {
+	if err := setCoreMigrationVersion(ctx, tx, m); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
 }
 
+func migrationSQL(sqlText string, remote bool) (string, error) {
+	if !remote {
+		return sqlText, nil
+	}
+	stripped := remoteUserVersionStatement.ReplaceAllString(sqlText, "")
+	if remoteUserVersionAssignment.MatchString(stripped) {
+		return "", errors.New("remote migration has a PRAGMA user_version assignment that is not a standalone statement")
+	}
+	return stripped, nil
+}
+
+func readCoreVersion(ctx context.Context, q schemaQueryer) (int, error) {
+	var version int
+	err := q.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version)
+	return version, err
+}
+
+func setCoreMigrationVersion(ctx context.Context, tx *sql.Tx, migration Migration) error {
+	// The remote Hrana driver sends multi-statement SQL as a batch, where
+	// Turso rejects the user_version PRAGMA. migrationSQL removes it from the
+	// batch; issue it here as a standalone statement instead.
+	_, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(migration.Version))
+	return err
+}
+
 // Rebuild migrations hold the sole writer connection while enforcement is
 // disabled. Child tables continue to refer to the original parent names;
 // the migration copies into new tables, drops originals, then renames.
-func rebuildTx(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) (err error) {
-	conn, err := db.Conn(ctx)
+func rebuildTx(ctx context.Context, d *DB, apply func(*sql.Tx) error) (err error) {
+	conn, err := d.Write.Conn(ctx)
 	if err != nil {
 		return err
 	}
@@ -210,8 +247,10 @@ func rebuildTx(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) (err 
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "ROLLBACK; BEGIN IMMEDIATE"); err != nil {
-		return err
+	if !d.Remote {
+		if _, err = tx.ExecContext(ctx, "ROLLBACK; BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
 	}
 	extensionObjects, err := captureExtensionSchemaObjects(ctx, tx)
 	if err != nil {

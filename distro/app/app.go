@@ -125,7 +125,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	log.Info("main.datadir", "path", cfg.DataDir)
 
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := db.OpenWithOptions(ctx, cfg.DataDir+"/suchi.db", db.OpenOptions{
+		TursoURL: cfg.TursoDatabaseURL, TursoToken: cfg.TursoAuthToken,
+	})
 	if err != nil {
 		log.Error("main.db.open", "err", err.Error())
 		return fmt.Errorf("main.db.open: %w", err)
@@ -440,9 +442,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	backupScheduler := backup.NewScheduler(backup.Config{
 		DataDir:            cfg.DataDir,
-		Interval:           runtimePrefs.BackupInterval,
+		Interval:           localBackupInterval(d, runtimePrefs.BackupInterval),
 		Keep:               cfg.BackupKeep,
-		AuditRetentionDays: cfg.AuditRetentionDays,
+		AuditRetentionDays: localAuditRetention(d, cfg.AuditRetentionDays),
 	})
 
 	envFSWatch := settings.FSWatchConfig{
@@ -550,7 +552,7 @@ func Run(ctx context.Context, opts Options) error {
 			BackupInterval: cfg.BackupInterval, OCRLanguages: cfg.OCRLanguages,
 		})
 		return api.RuntimePreferencesStatus{
-			BackupIntervalHours: int(fresh.BackupInterval / time.Hour),
+			BackupIntervalHours: int(localBackupInterval(d, fresh.BackupInterval) / time.Hour),
 			OCRLanguages:        fresh.OCRLanguages,
 		}, nil
 	}
@@ -560,8 +562,8 @@ func Run(ctx context.Context, opts Options) error {
 		})
 		liveOCRLanguages.Store(append([]string(nil), fresh.OCRLanguages...))
 		backupScheduler.Update(backup.Config{
-			DataDir: cfg.DataDir, Interval: fresh.BackupInterval,
-			Keep: cfg.BackupKeep, AuditRetentionDays: cfg.AuditRetentionDays,
+			DataDir: cfg.DataDir, Interval: localBackupInterval(d, fresh.BackupInterval),
+			Keep: cfg.BackupKeep, AuditRetentionDays: localAuditRetention(d, cfg.AuditRetentionDays),
 		})
 		return nil
 	}
@@ -747,6 +749,20 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	log.Info("main.shutdown.done")
 	return nil
+}
+
+func localBackupInterval(d *db.DB, interval time.Duration) time.Duration {
+	if d.Remote {
+		return 0
+	}
+	return interval
+}
+
+func localAuditRetention(d *db.DB, days int) int {
+	if d.Remote {
+		return 0
+	}
+	return days
 }
 
 // logEgressSurface records the effective outbound integrations gathered by

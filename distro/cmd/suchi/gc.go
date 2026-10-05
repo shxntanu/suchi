@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/johnnybravo-xyz/suchi/core/config"
-	"github.com/johnnybravo-xyz/suchi/core/db"
 	migrations "github.com/johnnybravo-xyz/suchi/core/db/migrations"
 	"github.com/johnnybravo-xyz/suchi/core/gc"
 	"github.com/johnnybravo-xyz/suchi/core/logx"
@@ -44,7 +43,7 @@ func runGC(args []string) int {
 
 	ctx := context.Background()
 
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		log.Error("gc.db.open", "err", err.Error())
 		return 1

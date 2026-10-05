@@ -157,7 +157,7 @@ func runExport(args []string) int {
 		}
 	}
 
-	d, err := db.Open(ctx, filepath.Join(cfg.DataDir, "suchi.db"))
+	d, err := openConfiguredDB(ctx, cfg, filepath.Join(cfg.DataDir, "suchi.db"))
 	if err != nil {
 		log.Error("export.db.open", "err", err.Error())
 		return 1

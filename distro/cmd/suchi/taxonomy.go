@@ -155,7 +155,7 @@ func runTaxonomyImport(args []string) int {
 	log := logx.Setup(os.Stderr, cfg.LogLevel)
 	slog.SetDefault(log)
 	ctx := context.Background()
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "db open: %v\n", err)
 		return 1
@@ -238,7 +238,7 @@ func runTaxonomyExport(args []string) int {
 	log := logx.Setup(os.Stderr, cfg.LogLevel)
 	slog.SetDefault(log)
 	ctx := context.Background()
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "db open: %v\n", err)
 		return 1
@@ -307,7 +307,7 @@ func runTaxonomyMerge(args []string) int {
 
 	ctx := context.Background()
 
-	d, err := db.Open(ctx, cfg.DataDir+"/suchi.db")
+	d, err := openConfiguredDB(ctx, cfg, cfg.DataDir+"/suchi.db")
 	if err != nil {
 		log.Error("taxonomy.db.open", "err", err.Error())
 		return 1

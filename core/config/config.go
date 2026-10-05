@@ -32,11 +32,15 @@ type Config struct {
 	RenderDocumentViews bool
 	PublicURL           string
 	DataDir             string
-	ListenAddr          string
-	LogLevel            string
-	PprofEnabled        bool
-	BodyLimit           int64
-	BackupInterval      time.Duration
+	// Turso config selects the remote libSQL metadata database when both
+	// URL and token are present. Local SQLite remains the default.
+	TursoDatabaseURL string
+	TursoAuthToken   string
+	ListenAddr       string
+	LogLevel         string
+	PprofEnabled     bool
+	BodyLimit        int64
+	BackupInterval   time.Duration
 	// TrustedProxyCIDRs enables forwarded client addresses for rate limiting
 	// only when the direct TCP peer belongs to an explicitly trusted network.
 	TrustedProxyCIDRs []netip.Prefix
@@ -189,6 +193,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		PublicURL:                        env("PUBLIC_URL", ""),
 		DataDir:                          env("DATA_DIR", "/data"),
+		TursoDatabaseURL:                 strings.TrimSpace(env("TURSO_DATABASE_URL", "")),
 		ListenAddr:                       env("LISTEN_ADDR", ":8000"),
 		LogLevel:                         env("LOG_LEVEL", "info"),
 		PprofEnabled:                     env("SUCHI_PPROF", "") == "1",
@@ -329,6 +334,18 @@ func Load() (*Config, error) {
 	}
 	if c.LLMAPIKey, err = readSecret("LLM_API_KEY"); err != nil {
 		return nil, err
+	}
+	if c.TursoAuthToken, err = readSecret("TURSO_AUTH_TOKEN"); err != nil {
+		return nil, err
+	}
+	if (c.TursoDatabaseURL == "") != (c.TursoAuthToken == "") {
+		return nil, errors.New("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must both be set or both unset")
+	}
+	if c.TursoDatabaseURL != "" {
+		u, parseErr := url.Parse(c.TursoDatabaseURL)
+		if parseErr != nil || u.Scheme != "libsql" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, errors.New("TURSO_DATABASE_URL must be a libsql:// URL without credentials, query, or fragment")
+		}
 	}
 
 	if c.PublicURL == "" {
